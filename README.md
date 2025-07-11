@@ -4,13 +4,17 @@ SSHift is a powerful Go-based CLI tool for managing SSH servers with advanced fe
 
 ## 🚀 Features
 
-- **🔐 Secure Password Management**: AES-256 encrypted password storage with system-specific keys
+- **🔐 Secure Password Management**: AES-256-CFB encrypted password storage with system-specific or custom keys
 - **🔄 Jump Server Support**: Automatic connection through jump servers using SSH ProxyJump
-- **📋 Interactive Menu**: User-friendly terminal interface with colored output
+- **📋 Interactive Menu**: User-friendly terminal interface with colored output and emojis
 - **🔑 Multiple Authentication**: Password, SSH key, and PEM file support
 - **📊 Data Export/Import**: Backup and restore server configurations
-- **🛡️ Security**: File permissions (0600) and memory-safe password handling
-- **🎨 Beautiful UI**: Colored terminal output for better user experience
+- **🛡️ Security**: File permissions (0600), memory-safe password handling, and input validation
+- **🎨 Beautiful UI**: Colored terminal output with emojis for better user experience
+- **🔒 Security Features**: SSH key permission validation, circular jump prevention, secure memory handling
+- **📋 Smart ID Management**: Auto-increment uses smallest available ID for efficient numbering
+- **📊 Organized Display**: Servers and jump relations automatically sorted by ID for better organization
+- **🎯 Consistent UI**: Unified prompt style with 🔍 emoji and proper table formatting
 
 ## 📦 Installation
 
@@ -68,20 +72,19 @@ sshift add
 # List all servers
 sshift list
 
-# Connect to server
-sshift connect <id>
-
 # Delete server (interactive)
 sshift delete
 
 # Edit server (interactive)
 sshift edit
 
+# Sort server IDs and update jump relations
+sshift sort
+
 # Manage jump relations
 sshift jump add
 sshift jump delete
 sshift jump list
-sshift jump connect <from_id> <to_id>
 
 # Export/Import data
 sshift export
@@ -90,6 +93,9 @@ sshift import
 # Security
 sshift key          # Show encryption key info
 sshift setup        # Setup encryption key
+sshift test         # Run in test mode (simulate connections)
+sshift version      # Show version
+sshift help         # Show help
 ```
 
 ### Interactive Menu
@@ -97,44 +103,79 @@ sshift setup        # Setup encryption key
 When you run `sshift` without arguments, you'll see an interactive menu:
 
 ```
+              __    _ ______
+   __________/ /_  (_) __/ /_______________________
+  / ___/ ___/ __ \/ / /_/ __/________________
+ (__  |__  ) / / / / __/ /_____________
+/____/____/_/ /_/_/_/  \__/______
+
 Welcome to SSHift! 🚀
 
-ID | NAME           | HOST            | USER  | AUTH
----|----------------|-----------------|-------|------
- 1 | Web Server     | 192.168.1.100   | admin | pass
- 2 | Database       | 192.168.1.101   | root  | pem
- 3 | Backup Server  | 192.168.1.102   | user  | Key
+ ID | SERVER NAME                    | IP              | USER      | AUTH
+-----|-------------------------------|----------------|----------|------
+ 1) | Web Server                     | 192.168.1.100   | admin     | pass
+ 2) | Database                       | 192.168.1.101   | root      | pem
+ 3) | Backup Server                  | 192.168.1.102   | user      | Key
+ 0) | Exit                           | -               | -         | -
 
-Select a server to connect:
+🔍  Select a server to connect:
 ```
+
+**Note**: Servers are automatically sorted by ID for better organization.
 
 ### Add Server Example
 
 ```bash
 $ sshift add
-Enter host (IP or domain): 192.168.1.100
-Enter username: admin
-Enter server name: Web Server
-Use password? (y/n): y
-Enter password: ********
-Confirm password: ********
-✅ Added server: Web Server (admin@192.168.1.100)
+
+Current servers:
+
+ ID | SERVER NAME                    | IP              | USER      | AUTH
+-----|-------------------------------|----------------|----------|------
+ 1) | Web Server                     | 192.168.1.100   | admin     | pass
+ 2) | Database                       | 192.168.1.101   | root      | pem
+
+🔍  Enter server ID [3] (press Enter for auto-increment):
+🔍  Enter host (IP or domain): 192.168.1.102
+🔍  Enter username: backup
+🔍  Enter server name: Backup Server
+🔍  Use password? (y/n): n
+Using SSH key authentication.
+
+Available SSH keys:
+  1) ~/.ssh/id_rsa
+  2) ~/.ssh/id_ed25519
+  3) Enter custom path
+
+🔍  Select SSH key (1-3): 1
+✅ Selected: ~/.ssh/id_rsa
+✅ Added server: Backup Server (ID: 3, backup@192.168.1.102)
 ```
+
+**Note**: Auto-increment uses the smallest available ID, not the maximum + 1.
 
 ### Jump Server Setup
 
 ```bash
-# Add jump relation (from server 1 to server 2)
-sshift jump add 1 2
+# Add jump relation (interactive)
+sshift jump add
+# Select FROM server ID: 1
+# Select TO server ID: 2
+# ✅ Jump relation created: Web Server (1) → Database (2)
 
 # List jump relations
 sshift jump list
-Jump Relations:
-- 1 → 2
+FROM                    | TO
+----------------------------------------
+1) Web Server           | 2) Database
+1) Web Server           | 3) Backup Server
 
-# Connect through jump server
-sshift jump connect 1 2
+# Connect through jump server (automatic when selecting target server)
+sshift
+# Select server 2 → automatically jumps through server 1
 ```
+
+**Note**: Jump relations are sorted by FROM ID, then by TO ID when FROM IDs are equal.
 
 ## 🔐 Security Features
 
@@ -142,15 +183,23 @@ sshift jump connect 1 2
 
 SSHift uses AES-256-CFB encryption for password storage:
 
-- **System Auto-Generated Key**: Default encryption using system-specific information
+- **System Auto-Generated Key**: Default encryption using system-specific information with high entropy
 - **Custom Key**: Set `SSHIFT_ENCRYPTION_KEY` environment variable for cross-system compatibility
+- **Secure Memory Handling**: Automatic memory clearing of sensitive data
 - **File Permissions**: All data files use 0600 permissions (owner read/write only)
 
 ### Authentication Methods
 
-1. **Password Authentication**: Encrypted storage with confirmation
-2. **SSH Key Authentication**: Uses default SSH keys or custom key paths
+1. **Password Authentication**: Encrypted storage with confirmation and basic validation
+2. **SSH Key Authentication**: Uses default SSH keys or custom key paths with permission validation
 3. **PEM File Authentication**: Support for custom private key files
+
+### Security Validations
+
+- **SSH Key Permissions**: Validates 600 permissions for SSH key files
+- **Input Sanitization**: Removes null bytes and problematic characters
+- **Circular Jump Prevention**: Prevents circular jump server relationships
+- **Basic Password Validation**: Checks for empty passwords and invalid characters
 
 ### Key Management
 
@@ -197,7 +246,7 @@ export SSHIFT_ENCRYPTION_KEY='your-32-character-secret-key'
 
 ```json
 {
-  "version": "1.0.0",
+  "version": "dev",
   "export_date": "2024-01-15 10:30:00",
   "servers": [...],
   "jump_relations": [...]
@@ -291,6 +340,9 @@ sshift edit
 
 # Delete server (removes related jump relations)
 sshift delete
+
+# List servers (sorted by ID)
+sshift list
 ```
 
 ### Jump Server Features
@@ -299,6 +351,9 @@ sshift delete
 - **ProxyJump Support**: Uses SSH ProxyJump for secure connections
 - **Password Support**: Handles password authentication through jump servers
 - **SSH Key Support**: Works with SSH keys for jump connections
+- **Circular Prevention**: Prevents circular jump relationships
+- **Organized Display**: Jump relations sorted by FROM ID, then by TO ID
+- **Clean Interface**: Removed redundant headers for cleaner output
 
 ## 🔍 Troubleshooting
 
@@ -308,16 +363,30 @@ sshift delete
 
    - Run `sshift setup` to configure encryption key
    - Check if `SSHIFT_ENCRYPTION_KEY` is set correctly
+   - Verify system-specific key generation
 
 2. **Jump Server Connection Issues**
 
    - Verify both servers are accessible
    - Check SSH key permissions (600)
    - Ensure jump relation is correctly configured
+   - Check for circular jump relationships
 
 3. **Permission Denied**
+
    - Check file permissions: `ls -la ~/.sshift/`
    - Should be 0600 for all files
+   - Check SSH key permissions: `ls -la ~/.ssh/`
+
+4. **SSH Key Permission Warnings**
+
+   - Fix SSH key permissions: `chmod 600 ~/.ssh/your_key`
+   - SSHift validates key file permissions for security
+
+5. **Table Formatting Issues**
+   - Table separators automatically align with content
+   - Server lists are sorted by ID for consistent display
+   - Jump relations are organized by FROM/TO ID order
 
 ### Debug Mode
 
@@ -329,14 +398,6 @@ SSHIFT_TEST_MODE=1 ./sshift
 ## 📝 License
 
 MIT License - see LICENSE file for details.
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
 
 ## 📞 Support
 
