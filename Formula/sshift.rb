@@ -6,7 +6,7 @@ class Sshift < Formula
   
   # Go source code
   url "https://github.com/takealook97/sshift/archive/refs/tags/v1.0.1.tar.gz"
-  sha256 "0019dfc4b32d63c1392aa264aed2253c1e0c2fb09216f8e2cc269bbfb8bb49b5"
+  sha256 "08f4abc7c449d079a8715d5a3289c6077935ffa17c29ad2bc8e267672d5cf631"
   
   depends_on "go" => :build
 
