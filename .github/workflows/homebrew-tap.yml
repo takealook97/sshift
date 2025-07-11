@@ -5,77 +5,37 @@ on:
     types: [published]
 
 jobs:
-  update-homebrew-tap:
+  update-homebrew:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout tap repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
         with:
           repository: takealook97/homebrew-sshift
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          path: tap
-
-      - name: Setup Ruby
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: "3.0"
+          path: homebrew-tap
 
       - name: Calculate SHA256
+        id: sha256
         run: |
-          VERSION=${{ github.event.release.tag_name }}
-          SOURCE_URL="https://github.com/${{ github.repository }}/archive/refs/tags/${VERSION}.tar.gz"
+          VERSION=${GITHUB_REF#refs/tags/}
+          SOURCE_URL="https://github.com/takealook97/sshift/archive/refs/tags/${VERSION}.tar.gz"
           SHA256=$(curl -sL "$SOURCE_URL" | shasum -a 256 | cut -d' ' -f1)
-          echo "SHA256=$SHA256" >> $GITHUB_ENV
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "sha256=$SHA256" >> $GITHUB_OUTPUT
+          echo "version=${VERSION#v}" >> $GITHUB_OUTPUT
 
       - name: Update Formula
         run: |
-          cd tap
+          cd homebrew-tap
+          sed -i "s/version \".*\"/version \"${{ steps.sha256.outputs.version }}\"/" sshift.rb
+          sed -i "s/sha256 \".*\"/sha256 \"${{ steps.sha256.outputs.sha256 }}\"/" sshift.rb
+          sed -i "s|url \".*\"|url \"https://github.com/takealook97/sshift/archive/refs/tags/${{ github.ref_name }}.tar.gz\"|" sshift.rb
 
-          # Create or update Formula file
-                    cat > sshift.rb << EOF
-class Sshift < Formula
-  desc "SSH server management tool with jump server support"
-  homepage "https://github.com/${{ github.repository }}"
-  version "$VERSION"
-  license "MIT"
-  
-  # Go source code
-  url "https://github.com/${{ github.repository }}/archive/refs/tags/${VERSION}.tar.gz"
-  sha256 "$SHA256"
-  
-  depends_on "go" => :build
-
-  def install
-    # Set version from git tag
-    ldflags = %W[
-      -s -w
-      -X main.Version=#{version}
-    ]
-    
-    system "go", "build", *std_go_args(ldflags: ldflags), "-o", bin/"sshift", "main.go"
-  end
-
-  test do
-    # Test version command
-    assert_match "SSHift v#{version}", shell_output("\#{bin}/sshift version")
-    
-    # Test help command
-    assert_match "Usage:", shell_output("\#{bin}/sshift help")
-  end
-end
-EOF
-
-      - name: Test Formula
+      - name: Commit and push
         run: |
-          cd tap
-          brew install --build-from-source ./sshift.rb
-
-      - name: Commit and push changes
-        run: |
-          cd tap
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
+          cd homebrew-tap
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
           git add sshift.rb
-          git commit -m "Update sshift to version $VERSION"
+          git commit -m "Update sshift to ${{ steps.sha256.outputs.version }}"
           git push

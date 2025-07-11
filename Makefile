@@ -98,38 +98,36 @@ test-run: build
 homebrew-formula:
 	@echo "Generating Homebrew Formula..."
 	@mkdir -p Formula
-	@cat > Formula/sshift.rb << EOF
-class Sshift < Formula
-  desc "SSH server management tool with jump server support"
-  homepage "https://github.com/takealook97/sshift"
-  version "$(VERSION)"
-  license "MIT"
-  
-  # Go source code
-  url "https://github.com/takealook97/sshift/archive/refs/tags/$(VERSION).tar.gz"
-  sha256 "$$(curl -sL "https://github.com/takealook97/sshift/archive/refs/tags/$(VERSION).tar.gz" | shasum -a 256 | cut -d' ' -f1)"
-  
-  depends_on "go" => :build
-
-  def install
-    # Set version from git tag
-    ldflags = %W[
-      -s -w
-      -X main.Version=#{version}
-    ]
-    
-    system "go", "build", *std_go_args(ldflags: ldflags), "-o", bin/"sshift", "main.go"
-  end
-
-  test do
-    # Test version command
-    assert_match "SSHift v#{version}", shell_output("#{bin}/sshift version")
-    
-    # Test help command
-    assert_match "Usage:", shell_output("#{bin}/sshift help")
-  end
-end
-EOF
+	@echo 'class Sshift < Formula' > Formula/sshift.rb
+	@echo '  desc "SSH server management tool with jump server support"' >> Formula/sshift.rb
+	@echo '  homepage "https://github.com/takealook97/sshift"' >> Formula/sshift.rb
+	@echo '  version "$(VERSION)"' >> Formula/sshift.rb
+	@echo '  license "MIT"' >> Formula/sshift.rb
+	@echo '' >> Formula/sshift.rb
+	@echo '  # Go source code' >> Formula/sshift.rb
+	@echo '  url "https://github.com/takealook97/sshift/archive/refs/tags/$(VERSION).tar.gz"' >> Formula/sshift.rb
+	@echo '  sha256 "$$(curl -sL "https://github.com/takealook97/sshift/archive/refs/tags/$(VERSION).tar.gz" | shasum -a 256 | cut -d" " -f1)"' >> Formula/sshift.rb
+	@echo '' >> Formula/sshift.rb
+	@echo '  depends_on "go" => :build' >> Formula/sshift.rb
+	@echo '' >> Formula/sshift.rb
+	@echo '  def install' >> Formula/sshift.rb
+	@echo '    # Set version from git tag' >> Formula/sshift.rb
+	@echo '    ldflags = %W[' >> Formula/sshift.rb
+	@echo '      -s -w' >> Formula/sshift.rb
+	@echo '      -X main.Version=#{version}' >> Formula/sshift.rb
+	@echo '    ]' >> Formula/sshift.rb
+	@echo '' >> Formula/sshift.rb
+	@echo '    system "go", "build", *std_go_args(ldflags: ldflags), "-o", bin/"sshift", "main.go"' >> Formula/sshift.rb
+	@echo '  end' >> Formula/sshift.rb
+	@echo '' >> Formula/sshift.rb
+	@echo '  test do' >> Formula/sshift.rb
+	@echo '    # Test version command' >> Formula/sshift.rb
+	@echo '    assert_match "SSHift v#{version}", shell_output("#{bin}/sshift version")' >> Formula/sshift.rb
+	@echo '' >> Formula/sshift.rb
+	@echo '    # Test help command' >> Formula/sshift.rb
+	@echo '    assert_match "Usage:", shell_output("#{bin}/sshift help")' >> Formula/sshift.rb
+	@echo '  end' >> Formula/sshift.rb
+	@echo 'end' >> Formula/sshift.rb
 	@echo "Homebrew Formula generated: Formula/sshift.rb"
 
 # Test Homebrew Formula

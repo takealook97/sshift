@@ -18,8 +18,8 @@
 go.work
 
 # Build output
-sshgo
-sshgo.exe
+sshift
+sshift.exe
 
 # IDE files
 .vscode/
@@ -45,5 +45,5 @@ Thumbs.db
 .env.local
 .env.*.local
 
-# SSHGo data directory (optional - remove if you want to track config)
-# .sshgo/ 
+# sshift data directory (optional - remove if you want to track config)
+.sshift/ 
