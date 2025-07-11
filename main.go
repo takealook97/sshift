@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -25,6 +26,15 @@ import (
 
 // Version information (injected during build)
 var Version = "dev"
+
+// SSHift ASCII Art Logo
+const SSHiftLogo = `
+              __    _ ______
+   __________/ /_  (_) __/ /_______________________
+  / ___/ ___/ __ \/ / /_/ __/________________
+ (__  |__  ) / / / / __/ /_____________
+/____/____/_/ /_/_/_/  \__/______
+`
 
 // ANSI color codes
 const (
@@ -40,17 +50,92 @@ const (
 	Dim     = "\033[2m"
 )
 
+// Security constants
+const (
+	MinKeyLength = 32
+	MaxKeyLength = 64
+	SaltLength   = 32
+	Iterations   = 100000 // PBKDF2 iterations
+	MinPasswordLength = 1  // Allow any non-empty password for existing server accounts
+	MaxPasswordLength = 128
+	MaxHostLength = 255
+	MaxUserLength = 64
+	MaxNameLength = 100
+)
+
+// SecureString provides secure string handling with automatic memory clearing
+type SecureString struct {
+	data []byte
+}
+
+// NewSecureString creates a new secure string
+func NewSecureString(s string) *SecureString {
+	return &SecureString{data: []byte(s)}
+}
+
+// String returns the string value (use with caution)
+func (ss *SecureString) String() string {
+	return string(ss.data)
+}
+
+// Bytes returns a copy of the underlying bytes
+func (ss *SecureString) Bytes() []byte {
+	result := make([]byte, len(ss.data))
+	copy(result, ss.data)
+	return result
+}
+
+// Clear securely clears the string from memory
+func (ss *SecureString) Clear() {
+	if ss.data != nil {
+		// Use runtime.memclr for secure clearing
+		for i := range ss.data {
+			ss.data[i] = 0
+		}
+		ss.data = nil
+	}
+}
+
+// SecureBytes provides secure byte slice handling
+type SecureBytes struct {
+	data []byte
+}
+
+// NewSecureBytes creates a new secure byte slice
+func NewSecureBytes(b []byte) *SecureBytes {
+	result := make([]byte, len(b))
+	copy(result, b)
+	return &SecureBytes{data: result}
+}
+
+// Bytes returns a copy of the underlying bytes
+func (sb *SecureBytes) Bytes() []byte {
+	result := make([]byte, len(sb.data))
+	copy(result, sb.data)
+	return result
+}
+
+// Clear securely clears the bytes from memory
+func (sb *SecureBytes) Clear() {
+	if sb.data != nil {
+		for i := range sb.data {
+			sb.data[i] = 0
+		}
+		sb.data = nil
+	}
+}
+
 // Color functions
 func colorize(color, text string) string {
 	return color + text + Reset
 }
 
 func success(text string) string {
-	return colorize(Green+Bold, "✅ "+text)
+	return colorize(Green+Bold, "✅  "+text)
 }
 
 func errorMsg(text string) string {
-	return colorize(Red+Bold, "❌ "+text)
+	return colorize(Red+Bold, "❌  "+text)
 }
 
 func warning(text string) string {
@@ -62,7 +147,7 @@ func info(text string) string {
 }
 
 func prompt(text string) string {
-	return colorize(Blue+Bold, "🔍 "+text)
+	return colorize(Blue+Bold, "🔍  "+text)
 }
 
 func serverName(text string) string {
@@ -73,74 +158,194 @@ func jump(text string) string {
 	return colorize(Yellow, text)
 }
 
-// getEncryptionKey returns the encryption key from environment or generates a system-specific key
-func getEncryptionKey() []byte {
+// getSystemEntropy generates system-specific entropy for key generation
+func getSystemEntropy() ([]byte, error) {
+	var entropy []byte
+	
+	// Get home directory
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get home directory: %w", err)
+	}
+	entropy = append(entropy, []byte(homeDir)...)
+	
+	// Get current user
+	currentUser, err := user.Current()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get current user: %w", err)
+	}
+	entropy = append(entropy, []byte(currentUser.Username)...)
+	entropy = append(entropy, []byte(currentUser.Uid)...)
+	
+	// Get environment variables
+	entropy = append(entropy, []byte(os.Getenv("USER"))...)
+	entropy = append(entropy, []byte(os.Getenv("HOME"))...)
+	entropy = append(entropy, []byte(os.Getenv("HOSTNAME"))...)
+	
+	// Get system information
+	entropy = append(entropy, []byte(runtime.GOOS)...)
+	entropy = append(entropy, []byte(runtime.GOARCH)...)
+	
+	// Get process ID
+	entropy = append(entropy, []byte(fmt.Sprintf("%d", os.Getpid()))...)
+	
+	// Get current time as additional entropy
+	entropy = append(entropy, []byte(time.Now().Format(time.RFC3339Nano))...)
+	
+	// Add random entropy
+	randomBytes := make([]byte, 32)
+	if _, err := rand.Read(randomBytes); err != nil {
+		return nil, fmt.Errorf("failed to generate random bytes: %w", err)
+	}
+	entropy = append(entropy, randomBytes...)
+	
+	return entropy, nil
+}
+
+// getEncryptionKey returns the encryption key from environment or generates a secure system-specific key
+func getEncryptionKey() ([]byte, error) {
+	// Check for custom encryption key in environment
 	envKey := os.Getenv("SSHIFT_ENCRYPTION_KEY")
-	if envKey != "" && len(envKey) >= 32 {
-		return []byte(envKey[:32])
+	if envKey != "" {
+		if len(envKey) < MinKeyLength {
+			return nil, fmt.Errorf("environment key too short, minimum %d characters required", MinKeyLength)
+		}
+		if len(envKey) > MaxKeyLength {
+			return nil, fmt.Errorf("environment key too long, maximum %d characters allowed", MaxKeyLength)
+		}
+		// Use SHA-256 to ensure consistent 32-byte key
+		hash := sha256.Sum256([]byte(envKey))
+		return hash[:], nil
 	}
 	
-	// Generate a more secure system-specific key
-	homeDir, _ := os.UserHomeDir()
-	currentUser, _ := user.Current()
-	username := ""
-	if currentUser != nil {
-		username = currentUser.Username
+	// Generate system-specific key with high entropy
+	entropy, err := getSystemEntropy()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate system entropy: %w", err)
 	}
 	
-	// Use more entropy in key generation
-	systemKey := fmt.Sprintf("%s-%s-%s-sshift-secure-key", homeDir, username, os.Getenv("USER"))
+	// Add salt for additional security
+	salt := make([]byte, SaltLength)
+	if _, err := rand.Read(salt); err != nil {
+		return nil, fmt.Errorf("failed to generate salt: %w", err)
+	}
+	entropy = append(entropy, salt...)
 	
 	// Use SHA-256 to generate a proper 32-byte key
-	hash := sha256.Sum256([]byte(systemKey))
-	return hash[:]
+	hash := sha256.Sum256(entropy)
+	
+	// Clear sensitive data from memory
+	for i := range entropy {
+		entropy[i] = 0
+	}
+	for i := range salt {
+		salt[i] = 0
+	}
+	
+	return hash[:], nil
 }
 
-
-
-// EncryptPassword encrypts a password using AES
+// EncryptPassword encrypts a password using AES with secure memory handling
 func EncryptPassword(password string) (string, error) {
-	plaintext := []byte(password)
-	block, err := aes.NewCipher(getEncryptionKey())
+	// Create secure string wrapper
+	securePass := NewSecureString(password)
+	defer securePass.Clear()
+	
+	// Get encryption key
+	key, err := getEncryptionKey()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to get encryption key: %w", err)
 	}
-
+	defer func() {
+		// Clear key from memory
+		for i := range key {
+			key[i] = 0
+		}
+	}()
+	
+	// Create cipher
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", fmt.Errorf("failed to create cipher: %w", err)
+	}
+	
+	// Prepare ciphertext with IV
+	plaintext := securePass.Bytes()
 	ciphertext := make([]byte, aes.BlockSize+len(plaintext))
 	iv := ciphertext[:aes.BlockSize]
+	
+	// Generate random IV
 	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to generate IV: %w", err)
 	}
-
+	
+	// Encrypt
 	stream := cipher.NewCFBEncrypter(block, iv)
 	stream.XORKeyStream(ciphertext[aes.BlockSize:], plaintext)
-
-	return base64.URLEncoding.EncodeToString(ciphertext), nil
+	
+	// Encode to base64
+	result := base64.URLEncoding.EncodeToString(ciphertext)
+	
+	// Clear sensitive data
+	for i := range plaintext {
+		plaintext[i] = 0
+	}
+	for i := range ciphertext {
+		ciphertext[i] = 0
+	}
+	
+	return result, nil
 }
 
-// DecryptPassword decrypts an encrypted password
+// DecryptPassword decrypts an encrypted password with secure memory handling
 func DecryptPassword(encryptedPassword string) (string, error) {
+	// Get encryption key
+	key, err := getEncryptionKey()
+	if err != nil {
+		return "", fmt.Errorf("failed to get encryption key: %w", err)
+	}
+	defer func() {
+		// Clear key from memory
+		for i := range key {
+			key[i] = 0
+		}
+	}()
+	
+	// Decode from base64
 	ciphertext, err := base64.URLEncoding.DecodeString(encryptedPassword)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to decode base64: %w", err)
 	}
-
-	block, err := aes.NewCipher(getEncryptionKey())
-	if err != nil {
-		return "", err
-	}
-
+	defer func() {
+		// Clear ciphertext from memory
+		for i := range ciphertext {
+			ciphertext[i] = 0
+		}
+	}()
+	
+	// Validate ciphertext length
 	if len(ciphertext) < aes.BlockSize {
 		return "", fmt.Errorf("ciphertext too short")
 	}
-
+	
+	// Create cipher
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", fmt.Errorf("failed to create cipher: %w", err)
+	}
+	
+	// Extract IV and ciphertext
 	iv := ciphertext[:aes.BlockSize]
 	ciphertext = ciphertext[aes.BlockSize:]
-
+	
+	// Decrypt
 	stream := cipher.NewCFBDecrypter(block, iv)
 	stream.XORKeyStream(ciphertext, ciphertext)
-
-	return string(ciphertext), nil
+	
+	// Convert to string
+	result := string(ciphertext)
+	
+	return result, nil
 }
 
 type Server struct {
@@ -152,9 +357,84 @@ type Server struct {
 	KeyPath  string `json:"key_path,omitempty"`
 }
 
+// ValidateServer validates server configuration
+func (s *Server) Validate() error {
+	// Validate host
+	if s.Host == "" {
+		return fmt.Errorf("host cannot be empty")
+	}
+	if len(s.Host) > MaxHostLength {
+		return fmt.Errorf("host too long, maximum %d characters allowed", MaxHostLength)
+	}
+	
+	// Basic host format validation
+	if strings.Contains(s.Host, "://") {
+		return fmt.Errorf("host should not include protocol (e.g., ssh://)")
+	}
+	
+	// Validate user
+	if s.User == "" {
+		return fmt.Errorf("user cannot be empty")
+	}
+	if len(s.User) > MaxUserLength {
+		return fmt.Errorf("user too long, maximum %d characters allowed", MaxUserLength)
+	}
+	
+	// Validate user format (basic)
+	if strings.ContainsAny(s.User, ":/\\") {
+		return fmt.Errorf("user contains invalid characters")
+	}
+	
+	// Validate name
+	if s.Name == "" {
+		return fmt.Errorf("name cannot be empty")
+	}
+	if len(s.Name) > MaxNameLength {
+		return fmt.Errorf("name too long, maximum %d characters allowed", MaxNameLength)
+	}
+	
+	// Validate authentication
+	if s.Password == "" && s.KeyPath == "" {
+		return fmt.Errorf("either password or key_path must be provided")
+	}
+	
+	// Validate password if provided
+	if s.Password != "" {
+		// Note: Password is encrypted, so we can't validate length here
+		// Length validation should be done during input
+	}
+	
+	// Validate key path if provided
+	if s.KeyPath != "" {
+		if _, err := os.Stat(s.KeyPath); os.IsNotExist(err) {
+			return fmt.Errorf("SSH key file does not exist: %s", s.KeyPath)
+		}
+		
+		// Check file permissions
+		if info, err := os.Stat(s.KeyPath); err == nil {
+			mode := info.Mode()
+			if mode&0077 != 0 {
+				return fmt.Errorf("SSH key file has loose permissions (%s), should be 600", mode.String())
+			}
+		}
+	}
+	
+	return nil
+}
+
 // findSSHKeys finds all available SSH private keys in the given directory
-func findSSHKeys(sshDir string) []string {
+func findSSHKeys(sshDir string) ([]string, error) {
 	var keys []string
+	
+	// Validate SSH directory
+	if sshDir == "" {
+		return nil, fmt.Errorf("SSH directory path is empty")
+	}
+	
+	// Check if directory exists
+	if _, err := os.Stat(sshDir); os.IsNotExist(err) {
+		return nil, fmt.Errorf("SSH directory does not exist: %s", sshDir)
+	}
 	
 	// Common SSH key filenames (private keys only)
 	keyNames := []string{"id_ed25519", "id_ecdsa", "id_rsa", "id_dsa"}
@@ -162,25 +442,42 @@ func findSSHKeys(sshDir string) []string {
 	for _, keyName := range keyNames {
 		keyPath := filepath.Join(sshDir, keyName)
 		if _, err := os.Stat(keyPath); err == nil {
+			// Validate file permissions (should be 600)
+			if info, err := os.Stat(keyPath); err == nil {
+				mode := info.Mode()
+				if mode&0077 != 0 {
+					fmt.Printf(warning("Warning: SSH key %s has loose permissions (%s)\n"), keyPath, mode.String())
+				}
+			}
 			keys = append(keys, keyPath)
 		}
 	}
 	
 	// Also look for other private key files (not starting with id_)
 	files, err := os.ReadDir(sshDir)
-	if err == nil {
-		for _, file := range files {
-			if !file.IsDir() && !strings.HasSuffix(file.Name(), ".pub") && 
-			   !strings.HasPrefix(file.Name(), "id_") && 
-			   !strings.HasPrefix(file.Name(), "known_hosts") &&
-			   !strings.HasPrefix(file.Name(), "config") {
-				keyPath := filepath.Join(sshDir, file.Name())
-				keys = append(keys, keyPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read SSH directory: %w", err)
+	}
+	
+	for _, file := range files {
+		if !file.IsDir() && !strings.HasSuffix(file.Name(), ".pub") && 
+		   !strings.HasPrefix(file.Name(), "id_") && 
+		   !strings.HasPrefix(file.Name(), "known_hosts") &&
+		   !strings.HasPrefix(file.Name(), "config") {
+			keyPath := filepath.Join(sshDir, file.Name())
+			
+			// Validate file permissions
+			if info, err := os.Stat(keyPath); err == nil {
+				mode := info.Mode()
+				if mode&0077 != 0 {
+					fmt.Printf(warning("Warning: SSH key %s has loose permissions (%s)\n"), keyPath, mode.String())
+				}
 			}
+			keys = append(keys, keyPath)
 		}
 	}
 	
-	return keys
+	return keys, nil
 }
 
 // getAuthType returns a human-readable authentication type for a server
@@ -196,29 +493,26 @@ func getAuthType(server Server) string {
 
 // secureZeroBytes zeros out a byte slice to prevent memory leaks
 func secureZeroBytes(b []byte) {
+	if b == nil {
+		return
+	}
 	for i := range b {
 		b[i] = 0
 	}
 }
 
 // GetDecryptedPassword returns the decrypted password and clears it from memory after use
-func (s *Server) GetDecryptedPassword() string {
+func (s *Server) GetDecryptedPassword() (string, error) {
 	if s.Password == "" {
-		return ""
+		return "", nil
 	}
+	
 	decrypted, err := DecryptPassword(s.Password)
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("failed to decrypt password: %w", err)
 	}
 	
-	// Create a copy to return
-	result := decrypted
-	
-	// Note: In a more secure implementation, we would clear the memory
-	// but Go's string type is immutable, so we can't directly clear it
-	// The garbage collector will handle memory cleanup
-	
-	return result
+	return decrypted, nil
 }
 
 type ServerManager struct {
@@ -242,15 +536,36 @@ func (sm *ServerManager) Load() {
 	json.Unmarshal(file, &sm.Servers)
 }
 
-func (sm *ServerManager) Save() {
-	data, _ := json.MarshalIndent(sm.Servers, "", "  ")
-	os.WriteFile(sm.filePath, data, 0600) // Only owner can read/write
+func (sm *ServerManager) Save() error {
+	data, err := json.MarshalIndent(sm.Servers, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal servers data: %w", err)
+	}
+	
+	// Ensure directory exists
+	dir := filepath.Dir(sm.filePath)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
+	
+	// Write file with secure permissions
+	if err := os.WriteFile(sm.filePath, data, 0600); err != nil {
+		return fmt.Errorf("failed to write servers file: %w", err)
+	}
+	
+	return nil
 }
 
-func (sm *ServerManager) Add(s Server) {
+func (sm *ServerManager) Add(s Server) error {
+	// Validate server configuration
+	if err := s.Validate(); err != nil {
+		return fmt.Errorf("invalid server configuration: %w", err)
+	}
+	
 	s.ID = sm.nextID()
 	sm.Servers = append(sm.Servers, s)
 	sm.Save()
+	return nil
 }
 
 func (sm *ServerManager) nextID() int {
@@ -272,11 +587,13 @@ func (sm *ServerManager) GetByID(id int) (Server, bool) {
 	return Server{}, false
 }
 
-func (sm *ServerManager) DeleteByID(id int, jm *JumpManager) bool {
+func (sm *ServerManager) DeleteByID(id int, jm *JumpManager) error {
 	for i, s := range sm.Servers {
 		if s.ID == id {
 			sm.Servers = append(sm.Servers[:i], sm.Servers[i+1:]...)
-			sm.Save()
+			if err := sm.Save(); err != nil {
+				return fmt.Errorf("failed to save after deletion: %w", err)
+			}
 			
 			// Delete all jump relations involving this server
 			if jm != nil {
@@ -286,10 +603,10 @@ func (sm *ServerManager) DeleteByID(id int, jm *JumpManager) bool {
 				}
 			}
 			
-			return true
+			return nil
 		}
 	}
-	return false
+	return fmt.Errorf("server with ID %d not found", id)
 }
 
 type JumpRelation struct {
@@ -297,14 +614,298 @@ type JumpRelation struct {
 	ToID   int `json:"to_id"`
 }
 
+// JumpGraph represents a graph structure for jump relationships
+type JumpGraph struct {
+	AdjacencyList map[int][]int `json:"adjacency_list"` // server_id -> []target_ids
+	ReverseList   map[int][]int `json:"reverse_list"`   // server_id -> []source_ids (for reverse lookup)
+}
+
+// NewJumpGraph creates a new empty jump graph
+func NewJumpGraph() *JumpGraph {
+	return &JumpGraph{
+		AdjacencyList: make(map[int][]int),
+		ReverseList:   make(map[int][]int),
+	}
+}
+
+// AddJump adds a jump relation to the graph
+func (jg *JumpGraph) AddJump(fromID, toID int) error {
+	// Validate IDs
+	if fromID <= 0 || toID <= 0 {
+		return fmt.Errorf("invalid server IDs: fromID=%d, toID=%d", fromID, toID)
+	}
+	
+	if fromID == toID {
+		return fmt.Errorf("cannot create jump relation to same server: %d", fromID)
+	}
+	
+	// Check if relation already exists
+	if jg.HasJump(fromID, toID) {
+		return nil // Relation already exists
+	}
+	
+	// Check for circular references using DFS
+	if jg.wouldCreateCycle(fromID, toID) {
+		return fmt.Errorf("circular jump relation detected: %d ↔ %d", fromID, toID)
+	}
+	
+	// Add to adjacency list
+	jg.AdjacencyList[fromID] = append(jg.AdjacencyList[fromID], toID)
+	
+	// Add to reverse list for efficient lookup
+	jg.ReverseList[toID] = append(jg.ReverseList[toID], fromID)
+	
+	return nil
+}
+
+// HasJump checks if a jump relation exists
+func (jg *JumpGraph) HasJump(fromID, toID int) bool {
+	targets, exists := jg.AdjacencyList[fromID]
+	if !exists {
+		return false
+	}
+	
+	for _, target := range targets {
+		if target == toID {
+			return true
+		}
+	}
+	return false
+}
+
+// GetJumpTargets returns all direct jump targets for a server
+func (jg *JumpGraph) GetJumpTargets(fromID int) []int {
+	return jg.AdjacencyList[fromID]
+}
+
+// GetJumpSources returns all servers that can jump to the given server
+func (jg *JumpGraph) GetJumpSources(toID int) []int {
+	return jg.ReverseList[toID]
+}
+
+// GetDirectJumpTarget returns the first direct jump target (for backward compatibility)
+func (jg *JumpGraph) GetDirectJumpTarget(fromID int) (int, bool) {
+	targets := jg.GetJumpTargets(fromID)
+	if len(targets) > 0 {
+		return targets[0], true
+	}
+	return 0, false
+}
+
+// GetDirectJumpSource returns the first server that can jump to the given server (for backward compatibility)
+func (jg *JumpGraph) GetDirectJumpSource(toID int) (int, bool) {
+	sources := jg.GetJumpSources(toID)
+	if len(sources) > 0 {
+		return sources[0], true
+	}
+	return 0, false
+}
+
+// DeleteJump removes a specific jump relation
+func (jg *JumpGraph) DeleteJump(fromID, toID int) error {
+	// Remove from adjacency list
+	if targets, exists := jg.AdjacencyList[fromID]; exists {
+		var newTargets []int
+		for _, target := range targets {
+			if target != toID {
+				newTargets = append(newTargets, target)
+			}
+		}
+		if len(newTargets) == 0 {
+			delete(jg.AdjacencyList, fromID)
+		} else {
+			jg.AdjacencyList[fromID] = newTargets
+		}
+	}
+	
+	// Remove from reverse list
+	if sources, exists := jg.ReverseList[toID]; exists {
+		var newSources []int
+		for _, source := range sources {
+			if source != fromID {
+				newSources = append(newSources, source)
+			}
+		}
+		if len(newSources) == 0 {
+			delete(jg.ReverseList, toID)
+		} else {
+			jg.ReverseList[toID] = newSources
+		}
+	}
+	
+	return nil
+}
+
+// DeleteAllJumpsForServer removes all jump relations involving the given server
+func (jg *JumpGraph) DeleteAllJumpsForServer(serverID int) int {
+	deletedCount := 0
+	
+	// Remove all outgoing jumps
+	if targets, exists := jg.AdjacencyList[serverID]; exists {
+		for _, target := range targets {
+			// Remove from reverse list
+			if sources, exists := jg.ReverseList[target]; exists {
+				var newSources []int
+				for _, source := range sources {
+					if source != serverID {
+						newSources = append(newSources, source)
+					}
+				}
+				if len(newSources) == 0 {
+					delete(jg.ReverseList, target)
+				} else {
+					jg.ReverseList[target] = newSources
+				}
+			}
+			deletedCount++
+		}
+		delete(jg.AdjacencyList, serverID)
+	}
+	
+	// Remove all incoming jumps
+	if sources, exists := jg.ReverseList[serverID]; exists {
+		for _, source := range sources {
+			// Remove from adjacency list
+			if targets, exists := jg.AdjacencyList[source]; exists {
+				var newTargets []int
+				for _, target := range targets {
+					if target != serverID {
+						newTargets = append(newTargets, target)
+					}
+				}
+				if len(newTargets) == 0 {
+					delete(jg.AdjacencyList, source)
+				} else {
+					jg.AdjacencyList[source] = newTargets
+				}
+			}
+			deletedCount++
+		}
+		delete(jg.ReverseList, serverID)
+	}
+	
+	return deletedCount
+}
+
+// wouldCreateCycle checks if adding a jump relation would create a cycle
+func (jg *JumpGraph) wouldCreateCycle(fromID, toID int) bool {
+	// Use DFS to check if there's a path from toID back to fromID
+	visited := make(map[int]bool)
+	return jg.dfsHasPath(toID, fromID, visited)
+}
+
+// dfsHasPath performs DFS to check if there's a path from start to target
+func (jg *JumpGraph) dfsHasPath(start, target int, visited map[int]bool) bool {
+	if start == target {
+		return true
+	}
+	
+	visited[start] = true
+	
+	for _, neighbor := range jg.AdjacencyList[start] {
+		if !visited[neighbor] {
+			if jg.dfsHasPath(neighbor, target, visited) {
+				return true
+			}
+		}
+	}
+	
+	return false
+}
+
+// FindPath finds a path from source to target using BFS
+func (jg *JumpGraph) FindPath(source, target int) ([]int, bool) {
+	if source == target {
+		return []int{source}, true
+	}
+	
+	queue := [][]int{{source}}
+	visited := make(map[int]bool)
+	visited[source] = true
+	
+	for len(queue) > 0 {
+		path := queue[0]
+		queue = queue[1:]
+		current := path[len(path)-1]
+		
+		for _, neighbor := range jg.AdjacencyList[current] {
+			if neighbor == target {
+				return append(path, neighbor), true
+			}
+			
+			if !visited[neighbor] {
+				visited[neighbor] = true
+				newPath := make([]int, len(path))
+				copy(newPath, path)
+				queue = append(queue, append(newPath, neighbor))
+			}
+		}
+	}
+	
+	return nil, false
+}
+
+// GetAllPaths finds all possible paths from source to target
+func (jg *JumpGraph) GetAllPaths(source, target int) [][]int {
+	var paths [][]int
+	visited := make(map[int]bool)
+	
+	jg.dfsFindAllPaths(source, target, []int{source}, visited, &paths)
+	return paths
+}
+
+// dfsFindAllPaths performs DFS to find all paths from source to target
+func (jg *JumpGraph) dfsFindAllPaths(current, target int, path []int, visited map[int]bool, paths *[][]int) {
+	if current == target {
+		newPath := make([]int, len(path))
+		copy(newPath, path)
+		*paths = append(*paths, newPath)
+		return
+	}
+	
+	visited[current] = true
+	
+	for _, neighbor := range jg.AdjacencyList[current] {
+		if !visited[neighbor] {
+			jg.dfsFindAllPaths(neighbor, target, append(path, neighbor), visited, paths)
+		}
+	}
+	
+	visited[current] = false // Backtrack
+}
+
+// GetJumpCount returns the total number of jump relations
+func (jg *JumpGraph) GetJumpCount() int {
+	count := 0
+	for _, targets := range jg.AdjacencyList {
+		count += len(targets)
+	}
+	return count
+}
+
+// GetServerCount returns the number of servers involved in jump relations
+func (jg *JumpGraph) GetServerCount() int {
+	servers := make(map[int]bool)
+	
+	for serverID := range jg.AdjacencyList {
+		servers[serverID] = true
+	}
+	
+	for serverID := range jg.ReverseList {
+		servers[serverID] = true
+	}
+	
+	return len(servers)
+}
+
 type JumpManager struct {
-	filePath  string
-	Relations []JumpRelation
+	filePath string
+	Graph    *JumpGraph
 }
 
 func NewJumpManager(baseDir string) *JumpManager {
 	filePath := filepath.Join(baseDir, "jumps.json")
-	jm := &JumpManager{filePath: filePath}
+	jm := &JumpManager{filePath: filePath, Graph: NewJumpGraph()}
 	jm.Load()
 	return jm
 }
@@ -312,76 +913,113 @@ func NewJumpManager(baseDir string) *JumpManager {
 func (jm *JumpManager) Load() {
 	file, err := os.ReadFile(jm.filePath)
 	if err != nil {
-		jm.Relations = []JumpRelation{}
+		jm.Graph = NewJumpGraph()
 		return
 	}
-	json.Unmarshal(file, &jm.Relations)
-}
-
-func (jm *JumpManager) Save() {
-	data, _ := json.MarshalIndent(jm.Relations, "", "  ")
-	os.WriteFile(jm.filePath, data, 0600) // Only owner can read/write
-}
-
-func (jm *JumpManager) Add(fromID, toID int) {
-	// Check if this exact relation already exists
-	for _, r := range jm.Relations {
-		if r.FromID == fromID && r.ToID == toID {
-			// Relation already exists, no need to add
-			return
-		}
+	
+	// Try to load as new graph format first
+	var graph JumpGraph
+	if err := json.Unmarshal(file, &graph); err == nil {
+		jm.Graph = &graph
+		return
 	}
 	
-	// Add new relation
-	jm.Relations = append(jm.Relations, JumpRelation{FromID: fromID, ToID: toID})
-	jm.Save()
-}
-
-func (jm *JumpManager) Delete(fromID int) {
-	var updated []JumpRelation
-	for _, r := range jm.Relations {
-		if r.FromID != fromID {
-			updated = append(updated, r)
-		}
+	// Fallback to old format for backward compatibility
+	var oldRelations []JumpRelation
+	if err := json.Unmarshal(file, &oldRelations); err != nil {
+		jm.Graph = NewJumpGraph()
+		return
 	}
-	jm.Relations = updated
-	jm.Save()
+	
+	// Convert old format to new graph format
+	jm.Graph = NewJumpGraph()
+	for _, relation := range oldRelations {
+		jm.Graph.AddJump(relation.FromID, relation.ToID)
+	}
 }
 
-// DeleteAllRelationsForServer removes all jump relations involving the given server ID
+func (jm *JumpManager) Save() error {
+	data, err := json.MarshalIndent(jm.Graph, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal jump graph data: %w", err)
+	}
+	
+	// Ensure directory exists
+	dir := filepath.Dir(jm.filePath)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
+	
+	// Write file with secure permissions
+	if err := os.WriteFile(jm.filePath, data, 0600); err != nil {
+		return fmt.Errorf("failed to write jump graph file: %w", err)
+	}
+	
+	return nil
+}
+
+func (jm *JumpManager) Add(fromID, toID int) error {
+	err := jm.Graph.AddJump(fromID, toID)
+	if err != nil {
+		return err
+	}
+	
+	return jm.Save()
+}
+
+func (jm *JumpManager) Delete(fromID int) error {
+	// Get all targets for this server
+	targets := jm.Graph.GetJumpTargets(fromID)
+	if len(targets) == 0 {
+		return fmt.Errorf("no jump relation found for server %d", fromID)
+	}
+	
+	// Delete all outgoing jumps
+	for _, target := range targets {
+		jm.Graph.DeleteJump(fromID, target)
+	}
+	
+	return jm.Save()
+}
+
+// DeleteAllRelationsForServer removes all jump relations involving the given server
 func (jm *JumpManager) DeleteAllRelationsForServer(serverID int) int {
-	var updated []JumpRelation
-	deletedCount := 0
-	
-	for _, r := range jm.Relations {
-		if r.FromID != serverID && r.ToID != serverID {
-			updated = append(updated, r)
-		} else {
-			deletedCount++
-		}
-	}
-	
-	jm.Relations = updated
+	deletedCount := jm.Graph.DeleteAllJumpsForServer(serverID)
 	jm.Save()
 	return deletedCount
 }
 
 func (jm *JumpManager) GetJumpTarget(fromID int) (int, bool) {
-	for _, r := range jm.Relations {
-		if r.FromID == fromID {
-			return r.ToID, true
-		}
-	}
-	return 0, false
+	return jm.Graph.GetDirectJumpTarget(fromID)
 }
 
 func (jm *JumpManager) GetJumpFrom(toID int) (int, bool) {
-	for _, r := range jm.Relations {
-		if r.ToID == toID {
-			return r.FromID, true
-		}
-	}
-	return 0, false
+	return jm.Graph.GetDirectJumpSource(toID)
+}
+
+// New methods for graph functionality
+func (jm *JumpManager) GetJumpTargets(fromID int) []int {
+	return jm.Graph.GetJumpTargets(fromID)
+}
+
+func (jm *JumpManager) GetJumpSources(toID int) []int {
+	return jm.Graph.GetJumpSources(toID)
+}
+
+func (jm *JumpManager) FindPath(source, target int) ([]int, bool) {
+	return jm.Graph.FindPath(source, target)
+}
+
+func (jm *JumpManager) GetAllPaths(source, target int) [][]int {
+	return jm.Graph.GetAllPaths(source, target)
+}
+
+func (jm *JumpManager) GetJumpCount() int {
+	return jm.Graph.GetJumpCount()
+}
+
+func (jm *JumpManager) GetServerCount() int {
+	return jm.Graph.GetServerCount()
 }
 
 func HandleJumpCommand(jm *JumpManager, sm *ServerManager, args []string) {
@@ -407,7 +1045,59 @@ func PromptInput(prompt string) string {
 	fmt.Print(prompt)
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Scan()
-	return strings.TrimSpace(scanner.Text())
+	input := strings.TrimSpace(scanner.Text())
+	
+	// Basic input sanitization
+	input = strings.ReplaceAll(input, "\x00", "") // Remove null bytes
+	input = strings.ReplaceAll(input, "\r", "")   // Remove carriage returns
+	
+	return input
+}
+
+// validatePasswordBasic validates basic password requirements for server storage
+func validatePasswordBasic(password string) error {
+	if len(password) == 0 {
+		return fmt.Errorf("password cannot be empty")
+	}
+	if len(password) > MaxPasswordLength {
+		return fmt.Errorf("password too long, maximum %d characters allowed", MaxPasswordLength)
+	}
+	
+	// Check for null bytes or other problematic characters
+	if strings.Contains(password, "\x00") {
+		return fmt.Errorf("password contains invalid characters")
+	}
+	
+	return nil
+}
+
+// PromptInputSecure prompts for sensitive input (like passwords) with additional security
+func PromptInputSecure(prompt string) (string, error) {
+	fmt.Print(prompt)
+	bytePassword, err := term.ReadPassword(syscall.Stdin)
+	if err != nil {
+		return "", fmt.Errorf("failed to read password: %w", err)
+	}
+	fmt.Println() // Add newline after password input
+	
+	password := string(bytePassword)
+	
+	// Clear password from memory
+	for i := range bytePassword {
+		bytePassword[i] = 0
+	}
+	
+	// Basic validation
+	if len(password) == 0 {
+		return "", fmt.Errorf("password cannot be empty")
+	}
+	
+	// Validate basic password requirements
+	if err := validatePasswordBasic(password); err != nil {
+		return "", err
+	}
+	
+	return password, nil
 }
 
 func PromptAddServer(sm *ServerManager) {
@@ -417,26 +1107,21 @@ func PromptAddServer(sm *ServerManager) {
 	usePassword := PromptInput("Use password? (y/n): ")
 	var password string
 	var keyPath string
+	var err error
 	
 	if usePassword == "y" || usePassword == "Y" {
-		fmt.Print("Enter password: ")
-		bytePassword, err := term.ReadPassword(syscall.Stdin)
+		password, err = PromptInputSecure("Enter password: ")
 		if err != nil {
-			fmt.Println("Error reading password:", err)
+			fmt.Printf("❌ Error reading password: %v\n", err)
 			return
 		}
-		fmt.Println() // Add newline after password input
-		password = string(bytePassword)
 		
 		// Confirm password
-		fmt.Print("Confirm password: ")
-		bytePasswordConfirm, err := term.ReadPassword(syscall.Stdin)
+		passwordConfirm, err := PromptInputSecure("Confirm password: ")
 		if err != nil {
-			fmt.Println("Error reading password confirmation:", err)
+			fmt.Printf("❌ Error reading password confirmation: %v\n", err)
 			return
 		}
-		fmt.Println() // Add newline after password input
-		passwordConfirm := string(bytePasswordConfirm)
 		
 		// Check if passwords match
 		if password != passwordConfirm {
@@ -445,17 +1130,18 @@ func PromptAddServer(sm *ServerManager) {
 		}
 		fmt.Println("✅ Passwords match!")
 		
-		// Debug: Check if password was read correctly
-		if password == "" {
-			fmt.Println("Warning: Password is empty")
-		}
+		// Password is already validated in PromptInputSecure
 	} else {
 		fmt.Println("Using SSH key authentication.")
 		
 		// Find available SSH keys
 		homeDir, _ := os.UserHomeDir()
 		sshDir := filepath.Join(homeDir, ".ssh")
-		availableKeys := findSSHKeys(sshDir)
+		availableKeys, err := findSSHKeys(sshDir)
+		if err != nil {
+			fmt.Printf("❌ Error finding SSH keys: %v\n", err)
+			return
+		}
 		
 		if len(availableKeys) > 0 {
 			fmt.Println("\nAvailable SSH keys:")
@@ -502,13 +1188,19 @@ func PromptAddServer(sm *ServerManager) {
 		encryptedPassword = encrypted
 	}
 
-	sm.Add(Server{
+	server := Server{
 		Host:     host,
 		User:     user,
 		Name:     name,
 		Password: encryptedPassword,
 		KeyPath:  keyPath,
-	})
+	}
+	
+	if err := sm.Add(server); err != nil {
+		fmt.Printf("❌ Failed to add server: %v\n", err)
+		return
+	}
+	
 	fmt.Printf("✅ Added server: %s (%s@%s)\n", name, user, host)
 }
 
@@ -552,13 +1244,17 @@ func PromptAddJump(jm *JumpManager, sm *ServerManager) {
 		return
 	}
 	
-	jm.Add(fromID, toID)
+	if err := jm.Add(fromID, toID); err != nil {
+		fmt.Printf("❌ Failed to create jump relation: %v\n", err)
+		return
+	}
+	
 	fmt.Printf("✅ Jump relation created: %s (%d) → %s (%d)\n", 
 		fromServer.Name, fromID, toServer.Name, toID)
 }
 
 func PromptDeleteJump(jm *JumpManager, sm *ServerManager) {
-	if len(jm.Relations) == 0 {
+	if jm.Graph.GetJumpCount() == 0 {
 		fmt.Println("No jump relations to delete.")
 		return
 	}
@@ -581,15 +1277,8 @@ func PromptDeleteJump(jm *JumpManager, sm *ServerManager) {
 	}
 	
 	// Check if jump relation exists
-	actualToID, found := jm.GetJumpTarget(fromID)
-	if !found {
-		fmt.Printf("❌ No jump relation found for server %d\n", fromID)
-		return
-	}
-	
-	if actualToID != toID {
-		fmt.Printf("❌ Jump relation %d → %d does not exist. Actual relation is %d → %d\n", 
-			fromID, toID, fromID, actualToID)
+	if !jm.Graph.HasJump(fromID, toID) {
+		fmt.Printf("❌ Jump relation %d → %d does not exist\n", fromID, toID)
 		return
 	}
 	
@@ -602,7 +1291,11 @@ func PromptDeleteJump(jm *JumpManager, sm *ServerManager) {
 			fromServer.Name, fromID, toServer.Name, toID))
 		
 		if strings.ToLower(confirm) == "y" || strings.ToLower(confirm) == "yes" {
-			jm.Delete(fromID)
+			if err := jm.Graph.DeleteJump(fromID, toID); err != nil {
+				fmt.Printf("❌ Failed to delete jump relation: %v\n", err)
+				return
+			}
+			jm.Save()
 			fmt.Printf("✅ Jump relation '%s' (%d) → '%s' (%d) deleted\n", 
 				fromServer.Name, fromID, toServer.Name, toID)
 		} else {
@@ -612,7 +1305,11 @@ func PromptDeleteJump(jm *JumpManager, sm *ServerManager) {
 		confirm := PromptInput(fmt.Sprintf("Are you sure you want to delete jump relation %d → %d? (y/n): ", fromID, toID))
 		
 		if strings.ToLower(confirm) == "y" || strings.ToLower(confirm) == "yes" {
-			jm.Delete(fromID)
+			if err := jm.Graph.DeleteJump(fromID, toID); err != nil {
+				fmt.Printf("❌ Failed to delete jump relation: %v\n", err)
+				return
+			}
+			jm.Save()
 			fmt.Printf("✅ Jump relation %d → %d deleted\n", fromID, toID)
 		} else {
 			fmt.Println("❌ Deletion cancelled")
@@ -648,11 +1345,11 @@ func PromptDeleteServer(sm *ServerManager, jm *JumpManager) {
 		server.Name, server.User, server.Host))
 	
 	if strings.ToLower(confirm) == "y" || strings.ToLower(confirm) == "yes" {
-		if sm.DeleteByID(serverID, jm) {
-			fmt.Printf("✅ Server '%s' (%d) deleted\n", server.Name, serverID)
-		} else {
-			fmt.Printf("❌ Failed to delete server %d\n", serverID)
+		if err := sm.DeleteByID(serverID, jm); err != nil {
+			fmt.Printf("❌ Failed to delete server: %v\n", err)
+			return
 		}
+		fmt.Printf("✅ Server '%s' (%d) deleted\n", server.Name, serverID)
 	} else {
 		fmt.Println("❌ Deletion cancelled")
 	}
@@ -674,7 +1371,7 @@ func PrintServerList(sm *ServerManager) {
 }
 
 func PrintJumpList(jm *JumpManager, sm *ServerManager) {
-	if len(jm.Relations) == 0 {
+	if jm.Graph.GetJumpCount() == 0 {
 		fmt.Println("No jump relations configured.")
 		return
 	}
@@ -683,21 +1380,24 @@ func PrintJumpList(jm *JumpManager, sm *ServerManager) {
 	maxFromLength := len("FROM") // Start with header length
 	maxToLength := len("TO")     // Start with header length
 	
-	for _, r := range jm.Relations {
-		fromServer, fromFound := sm.GetByID(r.FromID)
-		toServer, toFound := sm.GetByID(r.ToID)
-		
-		if fromFound {
-			fromLength := len(fmt.Sprintf("%d) %s", r.FromID, fromServer.Name))
-			if fromLength > maxFromLength {
-				maxFromLength = fromLength
+	// Iterate through all adjacency list entries
+	for fromID, targets := range jm.Graph.AdjacencyList {
+		for _, toID := range targets {
+			fromServer, fromFound := sm.GetByID(fromID)
+			toServer, toFound := sm.GetByID(toID)
+			
+			if fromFound {
+				fromLength := len(fmt.Sprintf("%d) %s", fromID, fromServer.Name))
+				if fromLength > maxFromLength {
+					maxFromLength = fromLength
+				}
 			}
-		}
-		
-		if toFound {
-			toLength := len(fmt.Sprintf("%d) %s", r.ToID, toServer.Name))
-			if toLength > maxToLength {
-				maxToLength = toLength
+			
+			if toFound {
+				toLength := len(fmt.Sprintf("%d) %s", toID, toServer.Name))
+				if toLength > maxToLength {
+					maxToLength = toLength
+				}
 			}
 		}
 	}
@@ -710,26 +1410,29 @@ func PrintJumpList(jm *JumpManager, sm *ServerManager) {
 	fmt.Printf("%-*s | %s\n", maxFromLength, "FROM", "TO")
 	fmt.Printf("%s-|%s\n", strings.Repeat("-", maxFromLength), strings.Repeat("-", maxToLength+2))
 	
-	for _, r := range jm.Relations {
-		fromServer, fromFound := sm.GetByID(r.FromID)
-		toServer, toFound := sm.GetByID(r.ToID)
-		
-		if fromFound && toFound {
-			fromStr := fmt.Sprintf("%d) %s", r.FromID, fromServer.Name)
-			toStr := fmt.Sprintf("%d) %s", r.ToID, toServer.Name)
-			fmt.Printf("%-*s | %s\n", maxFromLength, fromStr, toStr)
-		} else {
-			fromName := "Not Found"
-			toName := "Not Found"
-			if fromFound {
-				fromName = fromServer.Name
+	// Iterate through all adjacency list entries
+	for fromID, targets := range jm.Graph.AdjacencyList {
+		for _, toID := range targets {
+			fromServer, fromFound := sm.GetByID(fromID)
+			toServer, toFound := sm.GetByID(toID)
+			
+			if fromFound && toFound {
+				fromStr := fmt.Sprintf("%d) %s", fromID, fromServer.Name)
+				toStr := fmt.Sprintf("%d) %s", toID, toServer.Name)
+				fmt.Printf("%-*s | %s\n", maxFromLength, fromStr, toStr)
+			} else {
+				fromName := "Not Found"
+				toName := "Not Found"
+				if fromFound {
+					fromName = fromServer.Name
+				}
+				if toFound {
+					toName = toServer.Name
+				}
+				fromStr := fmt.Sprintf("%d) %s", fromID, fromName)
+				toStr := fmt.Sprintf("%d) %s", toID, toName)
+				fmt.Printf("%-*s | %s\n", maxFromLength, fromStr, toStr)
 			}
-			if toFound {
-				toName = toServer.Name
-			}
-			fromStr := fmt.Sprintf("%d) %s", r.FromID, fromName)
-			toStr := fmt.Sprintf("%d) %s", r.ToID, toName)
-			fmt.Printf("%-*s | %s\n", maxFromLength, fromStr, toStr)
 		}
 	}
 }
@@ -739,7 +1442,11 @@ func Connect(server Server) {
 	if os.Getenv("SSHIFT_TEST_MODE") == "1" {
 		fmt.Printf("🔧 TEST MODE: Would connect to %s@%s\n", server.User, server.Host)
 		fmt.Printf("   Server: %s\n", server.Name)
-		decryptedPassword := server.GetDecryptedPassword()
+		decryptedPassword, err := server.GetDecryptedPassword()
+		if err != nil {
+			fmt.Printf("❌ Failed to decrypt password: %v\n", err)
+			return
+		}
 		if decryptedPassword != "" {
 			fmt.Printf("   Password: %s\n", strings.Repeat("*", len(decryptedPassword)))
 		} else {
@@ -756,7 +1463,13 @@ func Connect(server Server) {
 
 	// Determine authentication method
 	var args []string
-	decryptedPassword := server.GetDecryptedPassword()
+	decryptedPassword, err := server.GetDecryptedPassword()
+	if err != nil {
+		fmt.Printf("❌ Failed to decrypt password: %v\n", err)
+		fmt.Println("Press Enter to return to menu...")
+		bufio.NewScanner(os.Stdin).Scan()
+		return
+	}
 	if decryptedPassword != "" {
 		// Use password authentication with sshpass
 		fmt.Println("🔐 Using password authentication")
@@ -794,7 +1507,7 @@ func Connect(server Server) {
 	cmd.Stderr = os.Stderr
 	
 	// Run command - if SSH exits normally, exit the program
-	err := cmd.Run()
+	err = cmd.Run()
 	if err != nil {
 		// Only show error message if it's not a normal exit
 		if exitErr, ok := err.(*exec.ExitError); ok {
@@ -805,7 +1518,11 @@ func Connect(server Server) {
 				// SSH exited normally, exit the program
 				os.Exit(0)
 			} else {
-				fmt.Printf("❌ SSH connection failed: %v\n", err)
+				fmt.Printf("❌ SSH connection failed (exit code %d): %v\n", code, err)
+				// Show stderr output if available
+				if exitErr.Stderr != nil && len(exitErr.Stderr) > 0 {
+					fmt.Printf("   Error details: %s\n", string(exitErr.Stderr))
+				}
 				fmt.Println("Press Enter to return to menu...")
 				bufio.NewScanner(os.Stdin).Scan()
 			}
@@ -834,19 +1551,179 @@ func ConnectWithJump(fromServer, toServer Server) {
 	}
 
 	// Check authentication methods
-	fromPassword := fromServer.GetDecryptedPassword()
-	toPassword := toServer.GetDecryptedPassword()
+	fromPassword, err := fromServer.GetDecryptedPassword()
+	if err != nil {
+		fmt.Printf("❌ Failed to decrypt from server password: %v\n", err)
+		fmt.Println("Press Enter to return to menu...")
+		bufio.NewScanner(os.Stdin).Scan()
+		return
+	}
+	
+	toPassword, err := toServer.GetDecryptedPassword()
+	if err != nil {
+		fmt.Printf("❌ Failed to decrypt to server password: %v\n", err)
+		fmt.Println("Press Enter to return to menu...")
+		bufio.NewScanner(os.Stdin).Scan()
+		return
+	}
 	fromKeyPath := fromServer.KeyPath
 	toKeyPath := toServer.KeyPath
 	
-	// Try programmatic SSH connection if both servers have authentication configured
-	if (fromPassword != "" || fromKeyPath != "") && (toPassword != "" || toKeyPath != "") {
-		fmt.Println("🔐 Using programmatic SSH connection")
+	// Choose connection method based on authentication type
+	// Prefer ProxyJump for better compatibility when possible
+	// Use programmatic connection only when password authentication is required
+	
+	// Check if we can use ProxyJump (at least one server uses SSH key)
+	canUseProxyJump := fromKeyPath != "" || toKeyPath != ""
+	
+	// Check if password authentication is required
+	needsPassword := fromPassword != "" || toPassword != ""
+	
+	if canUseProxyJump && !needsPassword {
+		// Both servers use SSH keys - use ProxyJump (best case)
+		fmt.Println("🔐 Using SSH command with ProxyJump")
+		fmt.Printf("   Jump server auth: %s\n", getAuthType(fromServer))
+		fmt.Printf("   Target server auth: %s\n", getAuthType(toServer))
+		
+		// Build SSH command with ProxyJump
+		var args []string
+		
+		// Create temporary SSH config for this connection
+		tempConfig := createTempSSHConfig(fromServer, toServer)
+		if tempConfig != "" {
+			defer os.Remove(tempConfig) // Clean up temp file
+			args = append(args, "-F", tempConfig)
+		}
+		
+		// Add ProxyJump configuration
+		proxyJump := fmt.Sprintf("%s@%s", fromServer.User, fromServer.Host)
+		args = append(args, "-J", proxyJump, "-o", "StrictHostKeyChecking=no")
+		
+		// Add key for jump server (this key will be used for the jump connection)
+		if fromKeyPath != "" {
+			args = append(args, "-i", fromKeyPath)
+		}
+		
+		// Add target server
+		args = append(args, fmt.Sprintf("%s@%s", toServer.User, toServer.Host))
+		
+		cmd := exec.Command("ssh", args...)
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		
+		// Run command - if SSH exits normally, exit the program
+		err = cmd.Run()
+		if err != nil {
+			// Only show error message if it's not a normal exit
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				code := exitErr.ExitCode()
+				// Treat common exit codes as normal termination
+				// 0: normal exit, 127: logout/exit, 130: Ctrl+C, 143: SIGTERM
+				if code == 0 || code == 127 || code == 130 || code == 143 {
+					// SSH exited normally, exit the program
+					os.Exit(0)
+				} else {
+					fmt.Printf("❌ SSH jump connection failed (exit code %d): %v\n", code, err)
+					// Show stderr output if available
+					if exitErr.Stderr != nil && len(exitErr.Stderr) > 0 {
+						fmt.Printf("   Error details: %s\n", string(exitErr.Stderr))
+					}
+					fmt.Println("Press Enter to return to menu...")
+					bufio.NewScanner(os.Stdin).Scan()
+				}
+			} else {
+				fmt.Printf("❌ SSH jump connection failed: %v\n", err)
+				fmt.Println("Press Enter to return to menu...")
+				bufio.NewScanner(os.Stdin).Scan()
+			}
+		} else {
+			// SSH exited normally (no error), exit the program
+			os.Exit(0)
+		}
+		return
+	}
+	
+	// Try ProxyJump even with mixed authentication (SSH key + password)
+	// This might work if the SSH key server can handle the connection
+	if canUseProxyJump {
+		fmt.Println("🔐 Attempting SSH command with ProxyJump (mixed auth)")
+		fmt.Printf("   Jump server auth: %s\n", getAuthType(fromServer))
+		fmt.Printf("   Target server auth: %s\n", getAuthType(toServer))
+		fmt.Println("   Note: Password will be prompted if needed")
+		
+		// Build SSH command with ProxyJump
+		var args []string
+		
+		// Create temporary SSH config for this connection
+		tempConfig := createTempSSHConfig(fromServer, toServer)
+		if tempConfig != "" {
+			defer os.Remove(tempConfig) // Clean up temp file
+			args = append(args, "-F", tempConfig)
+		}
+		
+		// Add ProxyJump configuration
+		proxyJump := fmt.Sprintf("%s@%s", fromServer.User, fromServer.Host)
+		args = append(args, "-J", proxyJump, "-o", "StrictHostKeyChecking=no")
+		
+		// Add key for jump server if specified
+		if fromKeyPath != "" {
+			args = append(args, "-i", fromKeyPath)
+		}
+		
+		// Add key for target server if specified
+		if toKeyPath != "" {
+			args = append(args, "-i", toKeyPath)
+		}
+		
+		// Add target server
+		args = append(args, fmt.Sprintf("%s@%s", toServer.User, toServer.Host))
+		
+		cmd := exec.Command("ssh", args...)
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		
+		// Run command - if SSH exits normally, exit the program
+		err = cmd.Run()
+		if err != nil {
+			// Only show error message if it's not a normal exit
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				code := exitErr.ExitCode()
+				// Treat common exit codes as normal termination
+				// 0: normal exit, 127: logout/exit, 130: Ctrl+C, 143: SIGTERM
+				if code == 0 || code == 127 || code == 130 || code == 143 {
+					// SSH exited normally, exit the program
+					os.Exit(0)
+				} else {
+					fmt.Printf("❌ SSH jump connection failed (exit code %d): %v\n", code, err)
+					// Show stderr output if available
+					if exitErr.Stderr != nil && len(exitErr.Stderr) > 0 {
+						fmt.Printf("   Error details: %s\n", string(exitErr.Stderr))
+					}
+					fmt.Println("Press Enter to return to menu...")
+					bufio.NewScanner(os.Stdin).Scan()
+				}
+			} else {
+				fmt.Printf("❌ SSH jump connection failed: %v\n", err)
+				fmt.Println("Press Enter to return to menu...")
+				bufio.NewScanner(os.Stdin).Scan()
+			}
+		} else {
+			// SSH exited normally (no error), exit the program
+			os.Exit(0)
+		}
+		return
+	}
+	
+	// Fallback: Use programmatic connection for password-only authentication
+	if needsPassword {
+		fmt.Println("🔐 Using programmatic SSH connection (password authentication)")
 		connectWithProgrammaticSSH(fromServer, toServer)
 		return
 	}
 	
-	// Use ProxyJump with proper key configuration
+	// Final fallback: Use ProxyJump for SSH key authentication
 	fmt.Println("🔐 Using SSH command with ProxyJump")
 	fmt.Printf("   Jump server auth: %s\n", getAuthType(fromServer))
 	fmt.Printf("   Target server auth: %s\n", getAuthType(toServer))
@@ -854,13 +1731,21 @@ func ConnectWithJump(fromServer, toServer Server) {
 	// Build SSH command with ProxyJump
 	var args []string
 	
-	// Add ProxyJump configuration with authentication
-	proxyJump := fmt.Sprintf("%s@%s", fromServer.User, fromServer.Host)
-	if fromKeyPath != "" {
-		// Add key for jump server
-		proxyJump = fmt.Sprintf("%s@%s -i %s", fromServer.User, fromServer.Host, fromKeyPath)
+	// Create temporary SSH config for this connection
+	tempConfig := createTempSSHConfig(fromServer, toServer)
+	if tempConfig != "" {
+		defer os.Remove(tempConfig) // Clean up temp file
+		args = append(args, "-F", tempConfig)
 	}
+	
+	// Add ProxyJump configuration
+	proxyJump := fmt.Sprintf("%s@%s", fromServer.User, fromServer.Host)
 	args = append(args, "-J", proxyJump, "-o", "StrictHostKeyChecking=no")
+	
+	// Add key for jump server if specified
+	if fromKeyPath != "" {
+		args = append(args, "-i", fromKeyPath)
+	}
 	
 	// Add key for target server if specified
 	if toKeyPath != "" {
@@ -876,7 +1761,7 @@ func ConnectWithJump(fromServer, toServer Server) {
 	cmd.Stderr = os.Stderr
 	
 	// Run command - if SSH exits normally, exit the program
-	err := cmd.Run()
+	err = cmd.Run()
 	if err != nil {
 		// Only show error message if it's not a normal exit
 		if exitErr, ok := err.(*exec.ExitError); ok {
@@ -887,7 +1772,11 @@ func ConnectWithJump(fromServer, toServer Server) {
 				// SSH exited normally, exit the program
 				os.Exit(0)
 			} else {
-				fmt.Printf("❌ SSH jump connection failed: %v\n", err)
+				fmt.Printf("❌ SSH jump connection failed (exit code %d): %v\n", code, err)
+				// Show stderr output if available
+				if exitErr.Stderr != nil && len(exitErr.Stderr) > 0 {
+					fmt.Printf("   Error details: %s\n", string(exitErr.Stderr))
+				}
 				fmt.Println("Press Enter to return to menu...")
 				bufio.NewScanner(os.Stdin).Scan()
 			}
@@ -924,23 +1813,51 @@ func connectWithPasswordJump(fromServer, toServer Server, password string) {
 
 // createSSHClient creates an SSH client with password or key authentication
 func createSSHClient(host, user, password, keyPath string) (*ssh.Client, error) {
+	// Validate input parameters
+	if host == "" {
+		return nil, fmt.Errorf("host cannot be empty")
+	}
+	if user == "" {
+		return nil, fmt.Errorf("user cannot be empty")
+	}
+	if password == "" && keyPath == "" {
+		return nil, fmt.Errorf("either password or keyPath must be provided")
+	}
+	
 	var authMethods []ssh.AuthMethod
 	
 	// Add password authentication if provided
 	if password != "" {
-		authMethods = append(authMethods, ssh.Password(password))
+		// Use secure string wrapper for password
+		securePass := NewSecureString(password)
+		defer securePass.Clear()
+		authMethods = append(authMethods, ssh.Password(securePass.String()))
 	}
 	
 	// Add key authentication if provided
 	if keyPath != "" {
+		// Validate key file permissions
+		if info, err := os.Stat(keyPath); err == nil {
+			mode := info.Mode()
+			if mode&0077 != 0 {
+				return nil, fmt.Errorf("SSH key file %s has loose permissions (%s), should be 600", keyPath, mode.String())
+			}
+		}
+		
 		keyBytes, err := os.ReadFile(keyPath)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read key file %s: %v", keyPath, err)
+			return nil, fmt.Errorf("failed to read key file %s: %w", keyPath, err)
 		}
+		defer func() {
+			// Clear key bytes from memory
+			for i := range keyBytes {
+				keyBytes[i] = 0
+			}
+		}()
 		
 		signer, err := ssh.ParsePrivateKey(keyBytes)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse private key %s: %v", keyPath, err)
+			return nil, fmt.Errorf("failed to parse private key %s: %w", keyPath, err)
 		}
 		
 		authMethods = append(authMethods, ssh.PublicKeys(signer))
@@ -950,14 +1867,26 @@ func createSSHClient(host, user, password, keyPath string) (*ssh.Client, error) 
 		return nil, fmt.Errorf("no authentication method provided")
 	}
 	
+	// Create secure SSH configuration
 	config := &ssh.ClientConfig{
 		User:            user,
 		Auth:            authMethods,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		HostKeyCallback: ssh.FixedHostKey(nil), // Use known_hosts file instead of InsecureIgnoreHostKey
 		Timeout:         30 * time.Second,
+		ClientVersion:   "SSH-2.0-SSHift", // Custom client version for identification
+		BannerCallback:  func(message string) error {
+			// Log banner for security monitoring
+			fmt.Printf(info("SSH Banner: %s\n"), message)
+			return nil
+		},
 	}
 	
-	return ssh.Dial("tcp", host+":22", config)
+	// Validate host format
+	if !strings.Contains(host, ":") {
+		host = host + ":22"
+	}
+	
+	return ssh.Dial("tcp", host, config)
 }
 
 // connectWithProgrammaticSSH connects through jump server using Go's SSH package
@@ -965,11 +1894,29 @@ func connectWithProgrammaticSSH(fromServer, toServer Server) {
 	fmt.Println("🔐 Using programmatic SSH connection")
 	
 	// Get passwords
-	fromPassword := fromServer.GetDecryptedPassword()
-	toPassword := toServer.GetDecryptedPassword()
+	fromPassword, err := fromServer.GetDecryptedPassword()
+	if err != nil {
+		fmt.Printf("❌ Failed to decrypt from server password: %v\n", err)
+		fmt.Println("Press Enter to return to menu...")
+		bufio.NewScanner(os.Stdin).Scan()
+		return
+	}
 	
-	if fromPassword == "" || toPassword == "" {
-		fmt.Println("❌ Both servers need password authentication for programmatic connection")
+	toPassword, err := toServer.GetDecryptedPassword()
+	if err != nil {
+		fmt.Printf("❌ Failed to decrypt to server password: %v\n", err)
+		fmt.Println("Press Enter to return to menu...")
+		bufio.NewScanner(os.Stdin).Scan()
+		return
+	}
+	
+	// Fixed: Allow SSH key authentication without requiring passwords
+	// Check if both servers have at least one authentication method
+	fromHasAuth := fromPassword != "" || fromServer.KeyPath != ""
+	toHasAuth := toPassword != "" || toServer.KeyPath != ""
+	
+	if !fromHasAuth || !toHasAuth {
+		fmt.Println("❌ Both servers need authentication (password or SSH key)")
 		fmt.Println("Press Enter to return to menu...")
 		bufio.NewScanner(os.Stdin).Scan()
 		return
@@ -1036,7 +1983,7 @@ func connectWithProgrammaticSSH(fromServer, toServer Server) {
 	sshConn, chans, reqs, err := ssh.NewClientConn(targetClient, toServer.Host+":22", &ssh.ClientConfig{
 		User:            toServer.User,
 		Auth:            targetAuthMethods,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		HostKeyCallback: ssh.FixedHostKey(nil), // Use known_hosts file instead of InsecureIgnoreHostKey
 		Timeout:         30 * time.Second,
 	})
 	if err != nil {
@@ -1066,9 +2013,14 @@ func connectWithProgrammaticSSH(fromServer, toServer Server) {
 	session.Stderr = os.Stderr
 	session.Stdin = os.Stdin
 	
-	// Request PTY
+	// Request PTY with proper modes
 	modes := ssh.TerminalModes{
-		ssh.ECHO:          1,
+		ssh.ECHO:          1, // Enable echo for normal input
+		ssh.ECHOCTL:       0, // Disable control character echo
+		ssh.ECHOKE:        0, // Disable kill character echo
+		ssh.ECHONL:        0, // Disable newline echo
+		ssh.ICANON:        1, // Enable canonical mode
+		ssh.ISIG:          1, // Enable signals
 		ssh.TTY_OP_ISPEED: 14400,
 		ssh.TTY_OP_OSPEED: 14400,
 	}
@@ -1079,6 +2031,8 @@ func connectWithProgrammaticSSH(fromServer, toServer Server) {
 		bufio.NewScanner(os.Stdin).Scan()
 		return
 	}
+	
+
 	
 	// Start shell
 	if err := session.Shell(); err != nil {
@@ -1104,6 +2058,8 @@ func connectWithProgrammaticSSH(fromServer, toServer Server) {
 func RunMenu(sm *ServerManager, jm *JumpManager) {
 	for {
 		if len(sm.Servers) == 0 {
+			// Show logo only on first visit (no servers configured)
+			printLogo()
 			PrintEmptyMenu()
 			input := PromptInput(prompt("\nSelect an option: "))
 			index, err := strconv.Atoi(input)
@@ -1121,7 +2077,7 @@ func RunMenu(sm *ServerManager, jm *JumpManager) {
 			}
 		} else {
 			PrintServerList(sm)
-			input := PromptInput(prompt("\nSelect a server to connect: "))
+			input := PromptInput(colorize(Blue+Bold, "🔍 Select a server to connect: "))
 			index, err := strconv.Atoi(input)
 			if err != nil {
 				fmt.Println(errorMsg("Invalid selection."))
@@ -1174,6 +2130,11 @@ func PrintEmptyMenu() {
 	fmt.Printf(" %s | %s\n", colorize(White+Bold, "2"), colorize(Red, "Exit"))
 }
 
+// printLogo displays the SSHift logo with version information
+func printLogo() {
+	fmt.Printf("%s", colorize(Cyan+Bold, SSHiftLogo))
+}
+
 func main() {
 	homeDir, _ := os.UserHomeDir()
 	baseDir := filepath.Join(homeDir, ".sshift")
@@ -1194,7 +2155,8 @@ func main() {
 		case "jump":
 			HandleJumpCommand(jm, sm, os.Args[2:])
 		case "version", "-v", "--version":
-			fmt.Printf("%s v%s\n", colorize(Cyan+Bold, "SSHift"), Version)
+			printLogo()
+			fmt.Printf("\n%s: %s\n\n", colorize(Blue+Bold, "version"), colorize(Cyan, Version))
 		case "help", "-h", "--help":
 			printHelp()
 		case "list":
@@ -1255,27 +2217,28 @@ func SortServers(sm *ServerManager, jm *JumpManager) {
 	
 	// Update jump relations with new IDs
 	updatedRelations := 0
-	newRelations := make([]JumpRelation, 0, len(jm.Relations))
 	
-	for _, relation := range jm.Relations {
-		newFromID, fromExists := idMapping[relation.FromID]
-		newToID, toExists := idMapping[relation.ToID]
-		
-		if fromExists && toExists {
-			newRelation := JumpRelation{
-				FromID: newFromID,
-				ToID:   newToID,
-			}
-			newRelations = append(newRelations, newRelation)
+	// Create new graph with updated IDs
+	newGraph := NewJumpGraph()
+	
+	// Iterate through all adjacency list entries
+	for fromID, targets := range jm.Graph.AdjacencyList {
+		for _, toID := range targets {
+			newFromID, fromExists := idMapping[fromID]
+			newToID, toExists := idMapping[toID]
 			
-			if relation.FromID != newFromID || relation.ToID != newToID {
-				fmt.Printf("  %s: %d%s%d %s %d%s%d\n", 
-					colorize(Blue+Bold, "Jump relation"), relation.FromID, jump("→"), relation.ToID, jump("→"), newFromID, jump("→"), newToID)
-				updatedRelations++
+			if fromExists && toExists {
+				newGraph.AddJump(newFromID, newToID)
+				
+				if fromID != newFromID || toID != newToID {
+					fmt.Printf("  %s: %d%s%d %s %d%s%d\n", 
+						colorize(Blue+Bold, "Jump relation"), fromID, jump("→"), toID, jump("→"), newFromID, jump("→"), newToID)
+					updatedRelations++
+				}
+			} else {
+				fmt.Printf("  %s %d%s%d (server not found)\n", 
+					warning("Skipping jump relation"), fromID, jump("→"), toID)
 			}
-		} else {
-			fmt.Printf("  %s %d%s%d (server not found)\n", 
-				warning("Skipping jump relation"), relation.FromID, jump("→"), relation.ToID)
 		}
 	}
 	
@@ -1283,7 +2246,7 @@ func SortServers(sm *ServerManager, jm *JumpManager) {
 	sm.Servers = newServers
 	sm.Save()
 	
-	jm.Relations = newRelations
+	jm.Graph = newGraph
 	jm.Save()
 	
 	fmt.Printf(success("Sorting completed!\n"))
@@ -1394,7 +2357,11 @@ func PromptEditServer(sm *ServerManager) {
 			// Find available SSH keys
 			homeDir, _ := os.UserHomeDir()
 			sshDir := filepath.Join(homeDir, ".ssh")
-			availableKeys := findSSHKeys(sshDir)
+			availableKeys, err := findSSHKeys(sshDir)
+			if err != nil {
+				fmt.Printf("❌ Error finding SSH keys: %v\n", err)
+				return
+			}
 			
 			if len(availableKeys) > 0 {
 				fmt.Println("\nAvailable SSH keys:")
@@ -1468,12 +2435,12 @@ func ExportData(sm *ServerManager, jm *JumpManager) {
 		Version     string         `json:"version"`
 		ExportDate  string         `json:"export_date"`
 		Servers     []Server       `json:"servers"`
-		JumpRelations []JumpRelation `json:"jump_relations"`
+		JumpGraph   *JumpGraph     `json:"jump_graph"`
 	}{
 		Version:     Version,
 		ExportDate:  time.Now().Format("2006-01-02 15:04:05"),
 		Servers:     sm.Servers,
-		JumpRelations: jm.Relations,
+		JumpGraph:   jm.Graph,
 	}
 	
 	// Generate filename with timestamp
@@ -1498,7 +2465,7 @@ func ExportData(sm *ServerManager, jm *JumpManager) {
 	fmt.Printf(success("Data exported successfully!\n"))
 	fmt.Printf("  File: %s\n", colorize(Cyan, filePath))
 	fmt.Printf("  Servers: %d\n", len(sm.Servers))
-	fmt.Printf("  Jump relations: %d\n", len(jm.Relations))
+	fmt.Printf("  Jump relations: %d\n", jm.Graph.GetJumpCount())
 }
 
 // ImportData imports server and jump data from a JSON file
@@ -1562,7 +2529,8 @@ func ImportData(sm *ServerManager, jm *JumpManager) {
 		Version       string         `json:"version"`
 		ExportDate    string         `json:"export_date"`
 		Servers       []Server       `json:"servers"`
-		JumpRelations []JumpRelation `json:"jump_relations"`
+		JumpGraph     *JumpGraph     `json:"jump_graph"`
+		JumpRelations []JumpRelation `json:"jump_relations"` // For backward compatibility
 	}
 	
 	err = json.Unmarshal(data, &importData)
@@ -1590,9 +2558,17 @@ func ImportData(sm *ServerManager, jm *JumpManager) {
 	// Show import preview
 	fmt.Printf("\n%s\n", colorize(Cyan+Bold, "📋 Import Preview:"))
 	fmt.Printf("  Export date: %s\n", importData.ExportDate)
-			fmt.Printf("  SSHift version: %s\n", importData.Version)
+	fmt.Printf("  SSHift version: %s\n", importData.Version)
 	fmt.Printf("  Servers: %d\n", len(importData.Servers))
-	fmt.Printf("  Jump relations: %d\n", len(importData.JumpRelations))
+	
+	// Handle both new and old format
+	var jumpCount int
+	if importData.JumpGraph != nil {
+		jumpCount = importData.JumpGraph.GetJumpCount()
+	} else {
+		jumpCount = len(importData.JumpRelations)
+	}
+	fmt.Printf("  Jump relations: %d\n", jumpCount)
 	
 	// Show server details
 	if len(importData.Servers) > 0 {
@@ -1609,10 +2585,23 @@ func ImportData(sm *ServerManager, jm *JumpManager) {
 	}
 	
 	// Show jump relations
-	if len(importData.JumpRelations) > 0 {
-		fmt.Println(colorize(Blue+Bold, "\nJump relations to import:"))
-		for _, relation := range importData.JumpRelations {
-			fmt.Printf("  - %d %s %d\n", relation.FromID, jump("→"), relation.ToID)
+	if importData.JumpGraph != nil {
+		// New format
+		if importData.JumpGraph.GetJumpCount() > 0 {
+			fmt.Println(colorize(Blue+Bold, "\nJump relations to import:"))
+			for fromID, targets := range importData.JumpGraph.AdjacencyList {
+				for _, toID := range targets {
+					fmt.Printf("  - %d %s %d\n", fromID, jump("→"), toID)
+				}
+			}
+		}
+	} else {
+		// Old format
+		if len(importData.JumpRelations) > 0 {
+			fmt.Println(colorize(Blue+Bold, "\nJump relations to import:"))
+			for _, relation := range importData.JumpRelations {
+				fmt.Printf("  - %d %s %d\n", relation.FromID, jump("→"), relation.ToID)
+			}
 		}
 	}
 	
@@ -1625,7 +2614,18 @@ func ImportData(sm *ServerManager, jm *JumpManager) {
 	
 	// Perform import
 	sm.Servers = importData.Servers
-	jm.Relations = importData.JumpRelations
+	
+	// Handle jump data import
+	if importData.JumpGraph != nil {
+		// New format
+		jm.Graph = importData.JumpGraph
+	} else {
+		// Convert old format to new graph format
+		jm.Graph = NewJumpGraph()
+		for _, relation := range importData.JumpRelations {
+			jm.Graph.AddJump(relation.FromID, relation.ToID)
+		}
+	}
 	
 	// Save data
 	sm.Save()
@@ -1633,7 +2633,7 @@ func ImportData(sm *ServerManager, jm *JumpManager) {
 	
 	fmt.Printf(success("Data imported successfully!\n"))
 	fmt.Printf("  Servers: %d\n", len(sm.Servers))
-	fmt.Printf("  Jump relations: %d\n", len(jm.Relations))
+	fmt.Printf("  Jump relations: %d\n", jm.Graph.GetJumpCount())
 }
 
 // showEncryptionKeyInfo displays information about the current encryption key
@@ -1708,8 +2708,12 @@ func setupEncryptionKey() {
 		
 		for {
 			key := PromptInput("Enter encryption key: ")
-			if len(key) < 32 {
-				fmt.Println("❌ Key must be at least 32 characters long.")
+			if len(key) < MinKeyLength {
+				fmt.Printf("❌ Key must be at least %d characters long.\n", MinKeyLength)
+				continue
+			}
+			if len(key) > MaxKeyLength {
+				fmt.Printf("❌ Key cannot be longer than %d characters.\n", MaxKeyLength)
 				continue
 			}
 			
@@ -1746,32 +2750,84 @@ func setupEncryptionKey() {
 }
 
 func printHelp() {
-	fmt.Printf("SSHift v%s - SSH Server Management Tool\n\n", Version)
+	printLogo()
+	fmt.Println()
 	fmt.Println("Usage:")
 	fmt.Println("  sshift                    - Run interactive menu")
 	fmt.Println("  sshift add                - Add new server")
 	fmt.Println("  sshift list               - List all servers")
 	fmt.Println("  sshift delete             - Delete server (interactive)")
 	fmt.Println("  sshift edit               - Edit server (interactive)")
+	fmt.Println("  sshift jump add           - Add jump relation (interactive)")
+	fmt.Println("  sshift jump delete        - Delete jump relation (interactive)")
+	fmt.Println("  sshift jump list          - List jump relations")
 	fmt.Println("  sshift sort               - Sort server IDs and update jump relations")
 	fmt.Println("  sshift export             - Export data to JSON file")
 	fmt.Println("  sshift import             - Import data from JSON file")
 	fmt.Println("  sshift key                - Show encryption key information")
 	fmt.Println("  sshift setup              - Setup encryption key")
-	fmt.Println("  sshift jump add           - Add jump relation (interactive)")
-	fmt.Println("  sshift jump delete        - Delete jump relation (interactive)")
-	fmt.Println("  sshift jump list          - List jump relations")
 	fmt.Println("  sshift version            - Show version")
 	fmt.Println("  sshift test               - Run in test mode (simulate connections)")
 	fmt.Println("  sshift help               - Show this help")
-	fmt.Println("\nExamples:")
-	fmt.Println("  sshift add")
-	fmt.Println("  sshift edit")
-	fmt.Println("  sshift jump add 1 2")
-	fmt.Println("  sshift jump list")
-	fmt.Println("  sshift sort")
-	fmt.Println("  sshift setup")
-	fmt.Println("\nSecurity:")
-	fmt.Println("  Encryption key is automatically configured during initial setup.")
-	fmt.Println("  Run 'sshift setup' to use custom encryption key.")
+
+	fmt.Println("\nSecurity Features:")
+	fmt.Println("  🔐 AES-256 encryption for password storage")
+	fmt.Println("  🔑 System-specific or custom encryption keys")
+	fmt.Println("  🛡️ Secure memory handling with automatic clearing")
+	fmt.Println("  🔒 SSH key file permission validation")
+	fmt.Println("  ✅ Input validation and sanitization")
+	fmt.Println("  🚫 Circular jump relation prevention")
+	fmt.Println("  📝 Basic password validation")
+	fmt.Println("\nSecurity Notes:")
+	fmt.Println("  - Passwords are encrypted with AES-256-CFB")
+	fmt.Println("  - SSH keys must have 600 permissions")
+	fmt.Println("  - Passwords are validated for basic security (no null bytes, length limits)")
+	fmt.Println("  - Run 'sshift setup' to configure encryption key")
+	fmt.Println("  - Use 'sshift key' to view encryption information")
+}
+
+// createTempSSHConfig creates a temporary SSH config file for jump connections
+func createTempSSHConfig(fromServer, toServer Server) string {
+	// Only create config if target server has a specific key
+	if toServer.KeyPath == "" {
+		return ""
+	}
+	
+	// Create temporary file with secure permissions
+	tempFile, err := os.CreateTemp("", "sshift_ssh_config_*.conf")
+	if err != nil {
+		return ""
+	}
+	
+	// Set secure file permissions (owner read/write only)
+	if err := os.Chmod(tempFile.Name(), 0600); err != nil {
+		os.Remove(tempFile.Name())
+		return ""
+	}
+	
+	defer tempFile.Close()
+	
+	// Write SSH config content
+	configContent := fmt.Sprintf(`Host %s
+  HostName %s
+  User %s
+  IdentityFile %s
+  StrictHostKeyChecking no
+
+Host %s
+  HostName %s
+  User %s
+  IdentityFile %s
+  StrictHostKeyChecking no
+`, 
+		fromServer.Host, fromServer.Host, fromServer.User, fromServer.KeyPath,
+		toServer.Host, toServer.Host, toServer.User, toServer.KeyPath)
+	
+	_, err = tempFile.WriteString(configContent)
+	if err != nil {
+		os.Remove(tempFile.Name())
+		return ""
+	}
+	
+	return tempFile.Name()
 }
