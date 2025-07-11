@@ -75,7 +75,7 @@ func jump(text string) string {
 
 // getEncryptionKey returns the encryption key from environment or generates a system-specific key
 func getEncryptionKey() []byte {
-	envKey := os.Getenv("SSHGO_ENCRYPTION_KEY")
+	envKey := os.Getenv("SSHIFT_ENCRYPTION_KEY")
 	if envKey != "" && len(envKey) >= 32 {
 		return []byte(envKey[:32])
 	}
@@ -89,7 +89,7 @@ func getEncryptionKey() []byte {
 	}
 	
 	// Use more entropy in key generation
-	systemKey := fmt.Sprintf("%s-%s-%s-sshgo-secure-key", homeDir, username, os.Getenv("USER"))
+	systemKey := fmt.Sprintf("%s-%s-%s-sshift-secure-key", homeDir, username, os.Getenv("USER"))
 	
 	// Use SHA-256 to generate a proper 32-byte key
 	hash := sha256.Sum256([]byte(systemKey))
@@ -384,7 +384,7 @@ func (jm *JumpManager) GetJumpFrom(toID int) (int, bool) {
 
 func HandleJumpCommand(jm *JumpManager, sm *ServerManager, args []string) {
 	if len(args) < 1 {
-		fmt.Println("Usage: sshgo jump add | delete <fromID> | list")
+		fmt.Println("Usage: sshift jump add | delete <fromID> | list")
 		return
 	}
 
@@ -695,7 +695,7 @@ func PrintJumpList(jm *JumpManager, sm *ServerManager) {
 
 func Connect(server Server) {
 	// Check if test mode is enabled
-	if os.Getenv("SSHGO_TEST_MODE") == "1" {
+	if os.Getenv("SSHIFT_TEST_MODE") == "1" {
 		fmt.Printf("🔧 TEST MODE: Would connect to %s@%s\n", server.User, server.Host)
 		fmt.Printf("   Server: %s\n", server.Name)
 		decryptedPassword := server.GetDecryptedPassword()
@@ -781,7 +781,7 @@ func Connect(server Server) {
 
 func ConnectWithJump(fromServer, toServer Server) {
 	// Check if test mode is enabled
-	if os.Getenv("SSHGO_TEST_MODE") == "1" {
+	if os.Getenv("SSHIFT_TEST_MODE") == "1" {
 		fmt.Printf("🔧 TEST MODE: Would connect through %s@%s to %s@%s\n", 
 			fromServer.User, fromServer.Host, toServer.User, toServer.Host)
 		fmt.Printf("   Jump: %s → %s\n", fromServer.Name, toServer.Name)
@@ -1125,7 +1125,7 @@ func RunMenu(sm *ServerManager, jm *JumpManager) {
 }
 
 func PrintEmptyMenu() {
-	fmt.Printf("\n%s\n", colorize(Cyan+Bold, "Welcome to SSHGo! 🚀"))
+	fmt.Printf("\n%s\n", colorize(Cyan+Bold, "Welcome to SSHift! 🚀"))
 	fmt.Println(colorize(Yellow, "No servers configured yet."))
 	fmt.Printf("\n%s\n", colorize(Blue+Bold, "No | OPTION"))
 	fmt.Println(colorize(Blue, "-------------"))
@@ -1135,7 +1135,7 @@ func PrintEmptyMenu() {
 
 func main() {
 	homeDir, _ := os.UserHomeDir()
-	baseDir := filepath.Join(homeDir, ".sshgo")
+	baseDir := filepath.Join(homeDir, ".sshift")
 	os.MkdirAll(baseDir, 0755)
 
 	// Check if this is the first run and setup encryption key
@@ -1153,13 +1153,13 @@ func main() {
 		case "jump":
 			HandleJumpCommand(jm, sm, os.Args[2:])
 		case "version", "-v", "--version":
-			fmt.Printf("%s v%s\n", colorize(Cyan+Bold, "SSHGo"), Version)
+			fmt.Printf("%s v%s\n", colorize(Cyan+Bold, "SSHift"), Version)
 		case "help", "-h", "--help":
 			printHelp()
 		case "list":
 			PrintServerList(sm)
 		case "test":
-			os.Setenv("SSHGO_TEST_MODE", "1")
+			os.Setenv("SSHIFT_TEST_MODE", "1")
 			fmt.Printf("%s\n", colorize(Yellow+Bold, "🔧 Test mode enabled. SSH connections will be simulated."))
 			RunMenu(sm, jm)
 		case "delete":
@@ -1177,7 +1177,7 @@ func main() {
 		case "key":
 			showEncryptionKeyInfo()
 		default:
-			fmt.Printf("%s\n", errorMsg("Unknown command. Use 'sshgo help' for usage information."))
+			fmt.Printf("%s\n", errorMsg("Unknown command. Use 'sshift help' for usage information."))
 		}
 	} else {
 		RunMenu(sm, jm)
@@ -1437,7 +1437,7 @@ func ExportData(sm *ServerManager, jm *JumpManager) {
 	
 	// Generate filename with timestamp
 	timestamp := time.Now().Format("20060102_150405")
-	filename := fmt.Sprintf("sshgo_export_%s.json", timestamp)
+	filename := fmt.Sprintf("sshift_export_%s.json", timestamp)
 	filePath := filepath.Join(sshDir, filename)
 	
 	// Marshal to JSON with indentation
@@ -1474,14 +1474,14 @@ func ImportData(sm *ServerManager, jm *JumpManager) {
 	
 	var exportFiles []string
 	for _, file := range files {
-		if !file.IsDir() && strings.HasPrefix(file.Name(), "sshgo_export_") && strings.HasSuffix(file.Name(), ".json") {
+		if !file.IsDir() && strings.HasPrefix(file.Name(), "sshift_export_") && strings.HasSuffix(file.Name(), ".json") {
 			exportFiles = append(exportFiles, file.Name())
 		}
 	}
 	
 	if len(exportFiles) == 0 {
 		fmt.Println(warning("No export files found in ~/.ssh/"))
-		fmt.Println(info("Use 'sshgo export' to create an export file first."))
+		fmt.Println(info("Use 'sshift export' to create an export file first."))
 		return
 	}
 	
@@ -1549,7 +1549,7 @@ func ImportData(sm *ServerManager, jm *JumpManager) {
 	// Show import preview
 	fmt.Printf("\n%s\n", colorize(Cyan+Bold, "📋 Import Preview:"))
 	fmt.Printf("  Export date: %s\n", importData.ExportDate)
-	fmt.Printf("  SSHGo version: %s\n", importData.Version)
+			fmt.Printf("  SSHift version: %s\n", importData.Version)
 	fmt.Printf("  Servers: %d\n", len(importData.Servers))
 	fmt.Printf("  Jump relations: %d\n", len(importData.JumpRelations))
 	
@@ -1597,13 +1597,13 @@ func ImportData(sm *ServerManager, jm *JumpManager) {
 
 // showEncryptionKeyInfo displays information about the current encryption key
 func showEncryptionKeyInfo() {
-	fmt.Println(colorize(Cyan+Bold, "🔐 SSHGo Encryption Key Information"))
+	fmt.Println(colorize(Cyan+Bold, "🔐 SSHift Encryption Key Information"))
 	fmt.Println()
 	
-	if customKey := os.Getenv("SSHGO_ENCRYPTION_KEY"); customKey != "" {
+	if customKey := os.Getenv("SSHIFT_ENCRYPTION_KEY"); customKey != "" {
 		fmt.Println(colorize(Blue+Bold, "Key Type:") + " Custom (Environment Variable)")
 		fmt.Printf(colorize(Blue+Bold, "Key Length:") + " %d characters\n", len(customKey))
-		fmt.Println(colorize(Blue+Bold, "Source:") + " SSHGO_ENCRYPTION_KEY environment variable")
+		fmt.Println(colorize(Blue+Bold, "Source:") + " SSHIFT_ENCRYPTION_KEY environment variable")
 		fmt.Println()
 		fmt.Println(warning("Security Note:"))
 		fmt.Println("   - Custom key is being used")
@@ -1628,10 +1628,10 @@ func showEncryptionKeyInfo() {
 	}
 	
 	fmt.Println()
-	fmt.Println(info("To change encryption key, run: sshgo setup"))
+	fmt.Println(info("To change encryption key, run: sshift setup"))
 }
 
-// isFirstRun checks if this is the first time running SSHGo
+// isFirstRun checks if this is the first time running SSHift
 func isFirstRun(baseDir string) bool {
 	serversFile := filepath.Join(baseDir, "servers.json")
 	_, err := os.Stat(serversFile)
@@ -1640,7 +1640,7 @@ func isFirstRun(baseDir string) bool {
 
 // setupEncryptionKey prompts user to set up encryption key
 func setupEncryptionKey() {
-	fmt.Println("🔐 SSHGo Initial Setup")
+	fmt.Println("🔐 SSHift Initial Setup")
 	fmt.Println("Setting up encryption key for secure password storage.")
 	fmt.Println()
 	
@@ -1655,7 +1655,7 @@ func setupEncryptionKey() {
 	case "1":
 		fmt.Println("✅ Using system auto-generated key.")
 		fmt.Println("   A unique key will be generated for each system.")
-		fmt.Println("   To share data between systems, run 'sshgo setup' again.")
+		fmt.Println("   To share data between systems, run 'sshift setup' again.")
 		
 	case "2":
 		fmt.Println("🔑 Setting up custom encryption key.")
@@ -1676,15 +1676,15 @@ func setupEncryptionKey() {
 			}
 			
 			// Set environment variable
-			os.Setenv("SSHGO_ENCRYPTION_KEY", key)
+			os.Setenv("SSHIFT_ENCRYPTION_KEY", key)
 			fmt.Println("✅ Custom key has been set.")
 			fmt.Println("   To permanently set this key in environment variable:")
-			fmt.Printf("   export SSHGO_ENCRYPTION_KEY='%s'\n", key)
+			fmt.Printf("   export SSHIFT_ENCRYPTION_KEY='%s'\n", key)
 			break
 		}
 		
 	case "3":
-		fmt.Println("⚠️  You can run 'sshgo setup' later to configure.")
+		fmt.Println("⚠️  You can run 'sshift setup' later to configure.")
 		return
 		
 	default:
@@ -1698,32 +1698,32 @@ func setupEncryptionKey() {
 }
 
 func printHelp() {
-	fmt.Printf("SSHGo v%s - SSH Server Management Tool\n\n", Version)
+	fmt.Printf("SSHift v%s - SSH Server Management Tool\n\n", Version)
 	fmt.Println("Usage:")
-	fmt.Println("  sshgo                    - Run interactive menu")
-	fmt.Println("  sshgo add                - Add new server")
-	fmt.Println("  sshgo list               - List all servers")
-	fmt.Println("  sshgo delete              - Delete server (interactive)")
-	fmt.Println("  sshgo edit               - Edit server (interactive)")
-	fmt.Println("  sshgo sort               - Sort server IDs and update jump relations")
-	fmt.Println("  sshgo export             - Export data to JSON file")
-	fmt.Println("  sshgo import             - Import data from JSON file")
-	fmt.Println("  sshgo key                - Show encryption key information")
-	fmt.Println("  sshgo setup              - Setup encryption key")
-	fmt.Println("  sshgo jump add           - Add jump relation (interactive)")
-	fmt.Println("  sshgo jump delete        - Delete jump relation (interactive)")
-	fmt.Println("  sshgo jump list          - List jump relations")
-	fmt.Println("  sshgo version            - Show version")
-	fmt.Println("  sshgo test               - Run in test mode (simulate connections)")
-	fmt.Println("  sshgo help               - Show this help")
+	fmt.Println("  sshift                    - Run interactive menu")
+	fmt.Println("  sshift add                - Add new server")
+	fmt.Println("  sshift list               - List all servers")
+	fmt.Println("  sshift delete             - Delete server (interactive)")
+	fmt.Println("  sshift edit               - Edit server (interactive)")
+	fmt.Println("  sshift sort               - Sort server IDs and update jump relations")
+	fmt.Println("  sshift export             - Export data to JSON file")
+	fmt.Println("  sshift import             - Import data from JSON file")
+	fmt.Println("  sshift key                - Show encryption key information")
+	fmt.Println("  sshift setup              - Setup encryption key")
+	fmt.Println("  sshift jump add           - Add jump relation (interactive)")
+	fmt.Println("  sshift jump delete        - Delete jump relation (interactive)")
+	fmt.Println("  sshift jump list          - List jump relations")
+	fmt.Println("  sshift version            - Show version")
+	fmt.Println("  sshift test               - Run in test mode (simulate connections)")
+	fmt.Println("  sshift help               - Show this help")
 	fmt.Println("\nExamples:")
-	fmt.Println("  sshgo add")
-	fmt.Println("  sshgo edit")
-	fmt.Println("  sshgo jump add 1 2")
-	fmt.Println("  sshgo jump list")
-	fmt.Println("  sshgo sort")
-	fmt.Println("  sshgo setup")
+	fmt.Println("  sshift add")
+	fmt.Println("  sshift edit")
+	fmt.Println("  sshift jump add 1 2")
+	fmt.Println("  sshift jump list")
+	fmt.Println("  sshift sort")
+	fmt.Println("  sshift setup")
 	fmt.Println("\nSecurity:")
 	fmt.Println("  Encryption key is automatically configured during initial setup.")
-	fmt.Println("  Run 'sshgo setup' to use custom encryption key.")
+	fmt.Println("  Run 'sshift setup' to use custom encryption key.")
 }

@@ -1,4 +1,4 @@
-module sshgo
+module sshift
 
 go 1.24
 

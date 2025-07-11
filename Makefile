@@ -1,7 +1,7 @@
-# SSHGo Makefile
+# SSHift Makefile
 
 # 변수 정의
-BINARY_NAME=sshgo
+BINARY_NAME=sshift
 BUILD_DIR=build
 VERSION=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS=-ldflags "-X main.Version=$(VERSION)"
@@ -91,7 +91,62 @@ dev: build
 .PHONY: test-run
 test-run: build
 	@echo "Running in test mode..."
-	SSHGO_TEST_MODE=1 ./$(BUILD_DIR)/$(BINARY_NAME)
+	SSHIFT_TEST_MODE=1 ./$(BUILD_DIR)/$(BINARY_NAME)
+
+# Generate Homebrew Formula
+.PHONY: homebrew-formula
+homebrew-formula:
+	@echo "Generating Homebrew Formula..."
+	@mkdir -p Formula
+	@cat > Formula/sshift.rb << EOF
+class Sshift < Formula
+  desc "SSH server management tool with jump server support"
+  homepage "https://github.com/takealook97/sshift"
+  version "$(VERSION)"
+  license "MIT"
+  
+  # Go source code
+  url "https://github.com/takealook97/sshift/archive/refs/tags/$(VERSION).tar.gz"
+  sha256 "$$(curl -sL "https://github.com/takealook97/sshift/archive/refs/tags/$(VERSION).tar.gz" | shasum -a 256 | cut -d' ' -f1)"
+  
+  depends_on "go" => :build
+
+  def install
+    # Set version from git tag
+    ldflags = %W[
+      -s -w
+      -X main.Version=#{version}
+    ]
+    
+    system "go", "build", *std_go_args(ldflags: ldflags), "-o", bin/"sshift", "main.go"
+  end
+
+  test do
+    # Test version command
+    assert_match "SSHift v#{version}", shell_output("#{bin}/sshift version")
+    
+    # Test help command
+    assert_match "Usage:", shell_output("#{bin}/sshift help")
+  end
+end
+EOF
+	@echo "Homebrew Formula generated: Formula/sshift.rb"
+
+# Test Homebrew Formula
+.PHONY: homebrew-test
+homebrew-test: homebrew-formula
+	@echo "Testing Homebrew Formula..."
+	@brew install --build-from-source ./Formula/sshift.rb
+	@echo "Homebrew Formula test completed"
+
+# Update Homebrew Formula SHA256
+.PHONY: homebrew-sha256
+homebrew-sha256:
+	@echo "Calculating SHA256 for version $(VERSION)..."
+	@SHA256=$$(curl -sL "https://github.com/takealook97/sshift/archive/refs/tags/$(VERSION).tar.gz" | shasum -a 256 | cut -d' ' -f1); \
+	echo "SHA256: $$SHA256"; \
+	sed -i '' "s/sha256 \"[^\"]*\"/sha256 \"$$SHA256\"/" Formula/sshift.rb
+	@echo "SHA256 updated in Formula/sshift.rb"
 
 # 도움말
 .PHONY: help
@@ -108,4 +163,7 @@ help:
 	@echo "  clean        - Clean build artifacts"
 	@echo "  dev          - Build and run in development mode"
 	@echo "  test-run     - Build and run in test mode"
+	@echo "  homebrew-formula - Generate Homebrew Formula"
+	@echo "  homebrew-test    - Test Homebrew Formula"
+	@echo "  homebrew-sha256  - Update SHA256 in Formula"
 	@echo "  help         - Show this help message" 

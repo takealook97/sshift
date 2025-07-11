@@ -14,19 +14,19 @@ jobs:
           - os: ubuntu-latest
             goos: linux
             goarch: amd64
-            binary_name: sshgo-linux-amd64
+            binary_name: sshift-linux-amd64
           - os: macos-latest
             goos: darwin
             goarch: amd64
-            binary_name: sshgo-darwin-amd64
+            binary_name: sshift-darwin-amd64
           - os: macos-latest
             goos: darwin
             goarch: arm64
-            binary_name: sshgo-darwin-arm64
+            binary_name: sshift-darwin-arm64
           - os: windows-latest
             goos: windows
             goarch: amd64
-            binary_name: sshgo-windows-amd64.exe
+            binary_name: sshift-windows-amd64.exe
 
     steps:
       - name: Checkout code
@@ -65,11 +65,56 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            sshgo-linux-amd64
-            sshgo-darwin-amd64
-            sshgo-darwin-arm64
-            sshgo-windows-amd64.exe
+            sshift-linux-amd64
+            sshift-darwin-amd64
+            sshift-darwin-arm64
+            sshift-windows-amd64.exe
           draft: false
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  homebrew:
+    needs: release
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.0"
+
+      - name: Install Homebrew
+        run: |
+          /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+          echo "$HOME/.homebrew/bin" >> $GITHUB_PATH
+
+      - name: Calculate SHA256
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          SOURCE_URL="https://github.com/${{ github.repository }}/archive/refs/tags/${VERSION}.tar.gz"
+          SHA256=$(curl -sL "$SOURCE_URL" | shasum -a 256 | cut -d' ' -f1)
+          echo "SHA256=$SHA256" >> $GITHUB_ENV
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Update Formula
+        run: |
+          # Update version and SHA256 in Formula
+          sed -i "s/version \"[^\"]*\"/version \"$VERSION\"/" Formula/sshift.rb
+          sed -i "s|url \"[^\"]*\"|url \"https://github.com/${{ github.repository }}/archive/refs/tags/${VERSION}.tar.gz\"|" Formula/sshift.rb
+          sed -i "s/sha256 \"[^\"]*\"/sha256 \"$SHA256\"/" Formula/sshift.rb
+
+      - name: Test Formula
+        run: |
+          brew install --build-from-source ./Formula/sshift.rb
+
+      - name: Commit and push changes
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add Formula/sshift.rb
+          git commit -m "Update Formula for version $VERSION" || exit 0
+          git push

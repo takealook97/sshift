@@ -1,0 +1,81 @@
+name: Update Homebrew Tap
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  update-homebrew-tap:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tap repository
+        uses: actions/checkout@v4
+        with:
+          repository: takealook97/homebrew-sshift
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.0"
+
+      - name: Calculate SHA256
+        run: |
+          VERSION=${{ github.event.release.tag_name }}
+          SOURCE_URL="https://github.com/${{ github.repository }}/archive/refs/tags/${VERSION}.tar.gz"
+          SHA256=$(curl -sL "$SOURCE_URL" | shasum -a 256 | cut -d' ' -f1)
+          echo "SHA256=$SHA256" >> $GITHUB_ENV
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Update Formula
+        run: |
+          cd tap
+
+          # Create or update Formula file
+                    cat > sshift.rb << EOF
+class Sshift < Formula
+  desc "SSH server management tool with jump server support"
+  homepage "https://github.com/${{ github.repository }}"
+  version "$VERSION"
+  license "MIT"
+  
+  # Go source code
+  url "https://github.com/${{ github.repository }}/archive/refs/tags/${VERSION}.tar.gz"
+  sha256 "$SHA256"
+  
+  depends_on "go" => :build
+
+  def install
+    # Set version from git tag
+    ldflags = %W[
+      -s -w
+      -X main.Version=#{version}
+    ]
+    
+    system "go", "build", *std_go_args(ldflags: ldflags), "-o", bin/"sshift", "main.go"
+  end
+
+  test do
+    # Test version command
+    assert_match "SSHift v#{version}", shell_output("\#{bin}/sshift version")
+    
+    # Test help command
+    assert_match "Usage:", shell_output("\#{bin}/sshift help")
+  end
+end
+EOF
+
+      - name: Test Formula
+        run: |
+          cd tap
+          brew install --build-from-source ./sshift.rb
+
+      - name: Commit and push changes
+        run: |
+          cd tap
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add sshift.rb
+          git commit -m "Update sshift to version $VERSION"
+          git push
