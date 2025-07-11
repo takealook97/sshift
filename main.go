@@ -1633,13 +1633,16 @@ func showEncryptionKeyInfo() {
 
 // isFirstRun checks if this is the first time running SSHift
 func isFirstRun(baseDir string) bool {
-	serversFile := filepath.Join(baseDir, "servers.json")
-	_, err := os.Stat(serversFile)
+	setupFile := filepath.Join(baseDir, ".setup_complete")
+	_, err := os.Stat(setupFile)
 	return os.IsNotExist(err)
 }
 
 // setupEncryptionKey prompts user to set up encryption key
 func setupEncryptionKey() {
+	homeDir, _ := os.UserHomeDir()
+	baseDir := filepath.Join(homeDir, ".sshift")
+	
 	fmt.Println("🔐 SSHift Initial Setup")
 	fmt.Println("Setting up encryption key for secure password storage.")
 	fmt.Println()
@@ -1690,6 +1693,10 @@ func setupEncryptionKey() {
 	default:
 		fmt.Println("❌ Invalid selection. Using system auto-generated key.")
 	}
+	
+	// Mark setup as complete
+	setupFile := filepath.Join(baseDir, ".setup_complete")
+	os.WriteFile(setupFile, []byte("Setup completed on "+time.Now().Format("2006-01-02 15:04:05")), 0600)
 	
 	fmt.Println()
 	fmt.Println("Initial setup completed! 🎉")
