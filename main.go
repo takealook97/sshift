@@ -568,14 +568,106 @@ func (sm *ServerManager) Add(s Server) error {
 	return nil
 }
 
-func (sm *ServerManager) nextID() int {
-	maxID := 0
-	for _, s := range sm.Servers {
-		if s.ID > maxID {
-			maxID = s.ID
+func (sm *ServerManager) AddWithID(s Server, id int) error {
+	// Validate server configuration
+	if err := s.Validate(); err != nil {
+		return fmt.Errorf("invalid server configuration: %w", err)
+	}
+	
+	// Check if ID already exists
+	if _, exists := sm.GetByID(id); exists {
+		return fmt.Errorf("server with ID %d already exists", id)
+	}
+	
+	// Validate ID
+	if id <= 0 {
+		return fmt.Errorf("invalid server ID: %d (must be positive)", id)
+	}
+	
+	s.ID = id
+	sm.Servers = append(sm.Servers, s)
+	sm.Save()
+	return nil
+}
+
+func (sm *ServerManager) UpdateServerID(oldID, newID int, jm *JumpManager) error {
+	// Validate new ID
+	if newID <= 0 {
+		return fmt.Errorf("invalid server ID: %d (must be positive)", newID)
+	}
+	
+	// Check if new ID already exists (except for the current server)
+	if _, exists := sm.GetByID(newID); exists && newID != oldID {
+		return fmt.Errorf("server with ID %d already exists", newID)
+	}
+	
+	// Find server with old ID
+	serverIndex := -1
+	for i, s := range sm.Servers {
+		if s.ID == oldID {
+			serverIndex = i
+			break
 		}
 	}
-	return maxID + 1
+	
+	if serverIndex == -1 {
+		return fmt.Errorf("server with ID %d not found", oldID)
+	}
+	
+	// Update server ID
+	oldServerID := sm.Servers[serverIndex].ID
+	sm.Servers[serverIndex].ID = newID
+	
+	// Update jump relations if JumpManager is provided
+	if jm != nil && oldID != newID {
+		// Create new graph with updated ID
+		newGraph := NewJumpGraph()
+		
+		// Copy all existing relations, updating the specific server ID
+		for fromID, targets := range jm.Graph.AdjacencyList {
+			newFromID := fromID
+			if fromID == oldID {
+				newFromID = newID
+			}
+			
+			for _, toID := range targets {
+				newToID := toID
+				if toID == oldID {
+					newToID = newID
+				}
+				
+				// Add the relation with updated IDs
+				if err := newGraph.AddJump(newFromID, newToID); err != nil {
+					return fmt.Errorf("failed to update jump relation: %w", err)
+				}
+			}
+		}
+		
+		// Update the graph
+		jm.Graph = newGraph
+		jm.Save()
+		
+		fmt.Printf("🔄 Updated jump relations: server ID %d → %d\n", oldServerID, newID)
+	}
+	
+	// Save server changes
+	sm.Save()
+	return nil
+}
+
+func (sm *ServerManager) nextID() int {
+	// Create a set of existing IDs for efficient lookup
+	existingIDs := make(map[int]bool)
+	for _, s := range sm.Servers {
+		existingIDs[s.ID] = true
+	}
+	
+	// Find the smallest available ID starting from 1
+	for id := 1; ; id++ {
+		if !existingIDs[id] {
+			return id
+		}
+	}
 }
 
 func (sm *ServerManager) GetByID(id int) (Server, bool) {
@@ -1101,13 +1193,52 @@ func PromptInputSecure(prompt string) (string, error) {
 }
 
 func PromptAddServer(sm *ServerManager) {
+	// Show current servers for reference
+	if len(sm.Servers) > 0 {
+		fmt.Println("\nCurrent servers:")
+		PrintServerList(sm)
+		fmt.Println()
+	}
+	
+	// Prompt for server ID
+	nextAutoID := sm.nextID()
+	idInput := PromptInput(prompt(fmt.Sprintf("Enter server ID [%d] (press Enter for auto-increment): ", nextAutoID)))
+	
+	var serverID int
+	var err error
+	
+	if idInput == "" {
+		// Auto-increment
+		serverID = nextAutoID
+		fmt.Printf("✅ Using auto-increment ID: %d\n", serverID)
+	} else {
+		// Manual ID
+		serverID, err = strconv.Atoi(idInput)
+		if err != nil {
+			fmt.Printf("❌ Invalid server ID: %s\n", idInput)
+			return
+		}
+		
+		// Check if ID already exists
+		if _, exists := sm.GetByID(serverID); exists {
+			fmt.Printf("❌ Server with ID %d already exists\n", serverID)
+			return
+		}
+		
+		if serverID <= 0 {
+			fmt.Printf("❌ Server ID must be positive: %d\n", serverID)
+			return
+		}
+		
+		fmt.Printf("✅ Using manual ID: %d\n", serverID)
+	}
+	
 	host := PromptInput("Enter host (IP or domain): ")
 	user := PromptInput("Enter username: ")
 	name := PromptInput("Enter server name: ")
 	usePassword := PromptInput("Use password? (y/n): ")
 	var password string
 	var keyPath string
-	var err error
 	
 	if usePassword == "y" || usePassword == "Y" {
 		password, err = PromptInputSecure("Enter password: ")
@@ -1196,12 +1327,22 @@ func PromptAddServer(sm *ServerManager) {
 		KeyPath:  keyPath,
 	}
 	
-	if err := sm.Add(server); err != nil {
-		fmt.Printf("❌ Failed to add server: %v\n", err)
-		return
+	// Add server with the specified ID
+	if idInput == "" {
+		// Auto-increment
+		if err := sm.Add(server); err != nil {
+			fmt.Printf("❌ Failed to add server: %v\n", err)
+			return
+		}
+	} else {
+		// Manual ID
+		if err := sm.AddWithID(server, serverID); err != nil {
+			fmt.Printf("❌ Failed to add server: %v\n", err)
+			return
+		}
 	}
 	
-	fmt.Printf("✅ Added server: %s (%s@%s)\n", name, user, host)
+	fmt.Printf("✅ Added server: %s (ID: %d, %s@%s)\n", name, serverID, user, host)
 }
 
 func PromptAddJump(jm *JumpManager, sm *ServerManager) {
@@ -1212,8 +1353,9 @@ func PromptAddJump(jm *JumpManager, sm *ServerManager) {
 
 	fmt.Println("\nAvailable servers:")
 	PrintServerList(sm)
-	
-	fromInput := PromptInput("\nSelect FROM server ID: ")
+
+	fmt.Println()
+	fromInput := PromptInput(prompt("Select FROM server ID: "))
 	fromID, err := strconv.Atoi(fromInput)
 	if err != nil {
 		fmt.Println("❌ Invalid server ID")
@@ -1226,7 +1368,7 @@ func PromptAddJump(jm *JumpManager, sm *ServerManager) {
 		return
 	}
 	
-	toInput := PromptInput("Select TO server ID: ")
+	toInput := PromptInput(prompt("Select TO server ID: "))
 	toID, err := strconv.Atoi(toInput)
 	if err != nil {
 		fmt.Println("❌ Invalid server ID")
@@ -1262,14 +1404,14 @@ func PromptDeleteJump(jm *JumpManager, sm *ServerManager) {
 	fmt.Println("\nAvailable jump relations:")
 	PrintJumpList(jm, sm)
 	
-	fromInput := PromptInput("\nEnter FROM server ID: ")
+	fromInput := PromptInput(prompt("Enter FROM server ID: "))
 	fromID, err := strconv.Atoi(fromInput)
 	if err != nil {
 		fmt.Println("❌ Invalid server ID")
 		return
 	}
 	
-	toInput := PromptInput("Enter TO server ID: ")
+	toInput := PromptInput(prompt("Enter TO server ID: "))
 	toID, err := strconv.Atoi(toInput)
 	if err != nil {
 		fmt.Println("❌ Invalid server ID")
@@ -1326,7 +1468,8 @@ func PromptDeleteServer(sm *ServerManager, jm *JumpManager) {
 	fmt.Println("\nAvailable servers:")
 	PrintServerList(sm)
 	
-	serverInput := PromptInput("\nEnter server ID to delete: ")
+	fmt.Println()
+	serverInput := PromptInput(prompt("Enter server ID to delete: "))
 	serverID, err := strconv.Atoi(serverInput)
 	if err != nil {
 		fmt.Println("❌ Invalid server ID")
@@ -1356,18 +1499,64 @@ func PromptDeleteServer(sm *ServerManager, jm *JumpManager) {
 }
 
 func PrintServerList(sm *ServerManager) {
-	fmt.Println("\n ID | SERVER NAME                    | IP              | USER      | AUTH")
-	fmt.Println("-----------------------------------------------------------------------------")
-	for _, s := range sm.Servers {
+	// Create a copy of servers and sort by ID
+	servers := make([]Server, len(sm.Servers))
+	copy(servers, sm.Servers)
+	
+	// Sort servers by ID
+	for i := 0; i < len(servers)-1; i++ {
+		for j := i + 1; j < len(servers); j++ {
+			if servers[i].ID > servers[j].ID {
+				servers[i], servers[j] = servers[j], servers[i]
+			}
+		}
+	}
+	
+	// Find the maximum ID width
+	maxIDWidth := 2 // Start with minimum width for "0)"
+	for _, s := range servers {
+		idStr := fmt.Sprintf("%d)", s.ID)
+		if len(idStr) > maxIDWidth {
+			maxIDWidth = len(idStr)
+		}
+	}
+	
+	// Define column widths
+	colWidths := []int{maxIDWidth, 30, 15, 9, 6}
+	
+	// Create header
+	headerFormat := fmt.Sprintf("%%%ds | %%-%ds | %%-%ds | %%-%ds | %%-%ds", 
+		colWidths[0], colWidths[1], colWidths[2], colWidths[3], colWidths[4])
+	headerLine := fmt.Sprintf(headerFormat, "ID", "SERVER NAME", "IP", "USER", "AUTH")
+	fmt.Printf("\n%s\n", headerLine)
+	
+	// Create separator line by replacing each character with "-"
+	separator := ""
+	for _, char := range headerLine {
+		if char == '|' {
+			separator += "|"
+		} else {
+			separator += "-"
+		}
+	}
+	fmt.Println(separator)
+	
+	// Print servers
+	rowFormat := fmt.Sprintf("%%%ds | %%-%ds | %%-%ds | %%-%ds | %%-%ds", 
+		colWidths[0], colWidths[1], colWidths[2], colWidths[3], colWidths[4])
+	for _, s := range servers {
 		auth := "Key"
 		if s.Password != "" {
 			auth = "pass"
 		} else if s.KeyPath != "" {
 			auth = "pem"
 		}
-		fmt.Printf("%2d) | %-30s | %-15s | %-9s | %-6s\n", s.ID, s.Name, s.Host, s.User, auth)
+		idStr := fmt.Sprintf("%d)", s.ID)
+		fmt.Printf(rowFormat+"\n", idStr, s.Name, s.Host, s.User, auth)
 	}
-	fmt.Printf(" 0) | %-30s | %-15s | %-9s | %-6s\n", "Exit", "-", "-", "-")
+	
+	// Print exit option
+	fmt.Printf(rowFormat+"\n", "0)", "Exit", "-", "-", "-")
 }
 
 func PrintJumpList(jm *JumpManager, sm *ServerManager) {
@@ -1375,6 +1564,16 @@ func PrintJumpList(jm *JumpManager, sm *ServerManager) {
 		fmt.Println("No jump relations configured.")
 		return
 	}
+	
+	// Collect all jump relations and sort them
+	type JumpEntry struct {
+		FromID int
+		ToID   int
+		FromStr string
+		ToStr   string
+	}
+	
+	var jumpEntries []JumpEntry
 	
 	// Find the maximum length of server names for proper alignment
 	maxFromLength := len("FROM") // Start with header length
@@ -1399,6 +1598,33 @@ func PrintJumpList(jm *JumpManager, sm *ServerManager) {
 					maxToLength = toLength
 				}
 			}
+			
+			// Create jump entry
+			fromName := "Not Found"
+			toName := "Not Found"
+			if fromFound {
+				fromName = fromServer.Name
+			}
+			if toFound {
+				toName = toServer.Name
+			}
+			
+			jumpEntries = append(jumpEntries, JumpEntry{
+				FromID: fromID,
+				ToID:   toID,
+				FromStr: fmt.Sprintf("%d) %s", fromID, fromName),
+				ToStr:   fmt.Sprintf("%d) %s", toID, toName),
+			})
+		}
+	}
+	
+	// Sort jump entries by FromID, then by ToID
+	for i := 0; i < len(jumpEntries)-1; i++ {
+		for j := i + 1; j < len(jumpEntries); j++ {
+			if jumpEntries[i].FromID > jumpEntries[j].FromID || 
+			   (jumpEntries[i].FromID == jumpEntries[j].FromID && jumpEntries[i].ToID > jumpEntries[j].ToID) {
+				jumpEntries[i], jumpEntries[j] = jumpEntries[j], jumpEntries[i]
+			}
 		}
 	}
 	
@@ -1406,35 +1632,27 @@ func PrintJumpList(jm *JumpManager, sm *ServerManager) {
 	maxFromLength += 2
 	maxToLength += 2
 	
-	fmt.Println("\nJump Relations:")
-	fmt.Printf("%-*s | %s\n", maxFromLength, "FROM", "TO")
-	fmt.Printf("%s-|%s\n", strings.Repeat("-", maxFromLength), strings.Repeat("-", maxToLength+2))
+	fmt.Println()
+	headerLine := fmt.Sprintf("%-*s | %-*s", maxFromLength, "FROM", maxToLength, "TO")
+	fmt.Println(headerLine)
 	
-	// Iterate through all adjacency list entries
-	for fromID, targets := range jm.Graph.AdjacencyList {
-		for _, toID := range targets {
-			fromServer, fromFound := sm.GetByID(fromID)
-			toServer, toFound := sm.GetByID(toID)
-			
-			if fromFound && toFound {
-				fromStr := fmt.Sprintf("%d) %s", fromID, fromServer.Name)
-				toStr := fmt.Sprintf("%d) %s", toID, toServer.Name)
-				fmt.Printf("%-*s | %s\n", maxFromLength, fromStr, toStr)
-			} else {
-				fromName := "Not Found"
-				toName := "Not Found"
-				if fromFound {
-					fromName = fromServer.Name
-				}
-				if toFound {
-					toName = toServer.Name
-				}
-				fromStr := fmt.Sprintf("%d) %s", fromID, fromName)
-				toStr := fmt.Sprintf("%d) %s", toID, toName)
-				fmt.Printf("%-*s | %s\n", maxFromLength, fromStr, toStr)
-			}
+	// Create separator line by replacing each character with "-"
+	separator := ""
+	for _, char := range headerLine {
+		if char == '|' {
+			separator += "|"
+		} else {
+			separator += "-"
 		}
 	}
+	fmt.Println(separator)
+	
+	// Print sorted jump entries
+	for _, entry := range jumpEntries {
+		fmt.Printf("%-*s | %-*s\n", maxFromLength, entry.FromStr, maxToLength, entry.ToStr)
+	}
+	
+	fmt.Println()
 }
 
 func Connect(server Server) {
@@ -2063,7 +2281,7 @@ func RunMenu(sm *ServerManager, jm *JumpManager) {
 			PrintEmptyMenu()
 			input := PromptInput(prompt("\nSelect an option: "))
 			index, err := strconv.Atoi(input)
-			if err != nil || index < 1 || index > 2 {
+			if err != nil || (index != 0 && index != 1) {
 				fmt.Println(errorMsg("Invalid selection."))
 				continue
 			}
@@ -2071,13 +2289,14 @@ func RunMenu(sm *ServerManager, jm *JumpManager) {
 			switch index {
 			case 1:
 				PromptAddServer(sm)
-			case 2:
+			case 0:
 				fmt.Println(info("Exiting."))
 				return
 			}
 		} else {
 			PrintServerList(sm)
-			input := PromptInput(colorize(Blue+Bold, "🔍 Select a server to connect: "))
+			fmt.Println()
+			input := PromptInput(prompt("Select a server to connect: "))
 			index, err := strconv.Atoi(input)
 			if err != nil {
 				fmt.Println(errorMsg("Invalid selection."))
@@ -2095,10 +2314,11 @@ func RunMenu(sm *ServerManager, jm *JumpManager) {
 				continue
 			}
 			
-			// Check if this server is a jump target (TO server)
-			jumpFromID, isJumpTarget := jm.GetJumpFrom(index)
-			if isJumpTarget {
-				// This is a TO server, need to jump through FROM server
+			// Check if this server requires a jump (either direct or chain)
+			// First check for direct jump
+			jumpFromID, isDirectJump := jm.GetJumpFrom(index)
+			if isDirectJump {
+				// Direct jump found
 				fromServer, fromFound := sm.GetByID(jumpFromID)
 				if !fromFound {
 					fmt.Printf(errorMsg("Jump FROM server %d not found.\n"), jumpFromID)
@@ -2106,13 +2326,52 @@ func RunMenu(sm *ServerManager, jm *JumpManager) {
 				}
 				
 				fmt.Printf("%s %s (%d) %s %s (%d)\n", 
-					colorize(Cyan+Bold, "🔄 Auto-jump:"), serverName(fromServer.Name), jumpFromID, jump("→"), serverName(targetServer.Name), index)
+					colorize(Cyan+Bold, "🔄 Direct jump:"), serverName(fromServer.Name), jumpFromID, jump("→"), serverName(targetServer.Name), index)
 				
 				// Use SSH ProxyJump to connect through FROM server to TO server
 				ConnectWithJump(fromServer, targetServer)
 			} else {
-				// Direct connection or FROM server
-				Connect(targetServer)
+				// Check for chain jump - find the shortest path to target
+				var bestPath []int
+				var bestSource int
+				
+				// Try to find a path from any server to the target
+				for _, server := range sm.Servers {
+					if server.ID != index { // Don't check path to itself
+						path, found := jm.FindPath(server.ID, index)
+						if found && (bestPath == nil || len(path) < len(bestPath)) {
+							bestPath = path
+							bestSource = server.ID
+						}
+					}
+				}
+				
+				if bestPath != nil && len(bestPath) > 1 {
+					// Chain jump found
+					fromServer, fromFound := sm.GetByID(bestSource)
+					if !fromFound {
+						fmt.Printf(errorMsg("Chain jump FROM server %d not found.\n"), bestSource)
+						continue
+					}
+					
+					// Display the chain path
+					pathStr := ""
+					for i, serverID := range bestPath {
+						if i > 0 {
+							pathStr += jump(" → ")
+						}
+						server, _ := sm.GetByID(serverID)
+						pathStr += fmt.Sprintf("%s (%d)", serverName(server.Name), serverID)
+					}
+					
+					fmt.Printf("%s %s\n", colorize(Cyan+Bold, "🔄 Chain jump:"), pathStr)
+					
+					// Use SSH ProxyJump to connect through the chain
+					ConnectWithJump(fromServer, targetServer)
+				} else {
+					// Direct connection or FROM server
+					Connect(targetServer)
+				}
 			}
 			
 			// If we reach here, it means SSH connection failed or was interrupted
@@ -2127,7 +2386,7 @@ func PrintEmptyMenu() {
 	fmt.Printf("\n%s\n", colorize(Blue+Bold, "No | OPTION"))
 	fmt.Println(colorize(Blue, "-------------"))
 	fmt.Printf(" %s | %s\n", colorize(White+Bold, "1"), colorize(Green, "Add new server"))
-	fmt.Printf(" %s | %s\n", colorize(White+Bold, "2"), colorize(Red, "Exit"))
+	fmt.Printf(" %s | %s\n", colorize(White+Bold, "0"), colorize(Red, "Exit"))
 }
 
 // printLogo displays the SSHift logo with version information
@@ -2161,6 +2420,7 @@ func main() {
 			printHelp()
 		case "list":
 			PrintServerList(sm)
+			fmt.Println()
 		case "test":
 			os.Setenv("SSHIFT_TEST_MODE", "1")
 			fmt.Printf("%s\n", colorize(Yellow+Bold, "🔧 Test mode enabled. SSH connections will be simulated."))
@@ -2170,7 +2430,7 @@ func main() {
 		case "sort":
 			SortServers(sm, jm)
 		case "edit":
-			PromptEditServer(sm)
+			PromptEditServer(sm, jm)
 		case "export":
 			ExportData(sm, jm)
 		case "import":
@@ -2254,7 +2514,7 @@ func SortServers(sm *ServerManager, jm *JumpManager) {
 	fmt.Printf("  - %d jump relations updated\n", updatedRelations)
 }
 
-func PromptEditServer(sm *ServerManager) {
+func PromptEditServer(sm *ServerManager, jm *JumpManager) {
 	if len(sm.Servers) == 0 {
 		fmt.Println(warning("No servers to edit."))
 		return
@@ -2263,7 +2523,8 @@ func PromptEditServer(sm *ServerManager) {
 	fmt.Printf("\n%s\n", colorize(Blue+Bold, "Available servers:"))
 	PrintServerList(sm)
 
-	serverInput := PromptInput(prompt("\nEnter server ID to edit: "))
+	fmt.Println()
+	serverInput := PromptInput(prompt("Enter server ID to edit: "))
 	serverID, err := strconv.Atoi(serverInput)
 	if err != nil {
 		fmt.Println(errorMsg("Invalid server ID"))
@@ -2277,8 +2538,41 @@ func PromptEditServer(sm *ServerManager) {
 		return
 	}
 
-	fmt.Printf("\n%s %s (%s@%s)\n", colorize(Cyan+Bold, "🔧 Editing server:"), serverName(server.Name), server.User, server.Host)
+	fmt.Printf("\n%s %s (ID: %d, %s@%s)\n", colorize(Cyan+Bold, "🔧 Editing server:"), serverName(server.Name), server.ID, server.User, server.Host)
 	fmt.Println("Press Enter to keep current value, or type new value:")
+
+	// Edit server ID
+	currentID := server.ID
+	idInput := PromptInput(fmt.Sprintf("Server ID [%d]: ", currentID))
+	var newID int
+	var idChanged bool
+	
+	if idInput == "" {
+		newID = currentID
+		idChanged = false
+	} else {
+		newID, err = strconv.Atoi(idInput)
+		if err != nil {
+			fmt.Printf("❌ Invalid server ID: %s\n", idInput)
+			return
+		}
+		
+		if newID <= 0 {
+			fmt.Printf("❌ Server ID must be positive: %d\n", newID)
+			return
+		}
+		
+		if newID != currentID {
+			// Check if new ID already exists
+			if _, exists := sm.GetByID(newID); exists {
+				fmt.Printf("❌ Server with ID %d already exists\n", newID)
+				return
+			}
+			idChanged = true
+		} else {
+			idChanged = false
+		}
+	}
 
 	// Edit host
 	currentHost := server.Host
@@ -2400,7 +2694,7 @@ func PromptEditServer(sm *ServerManager) {
 
 	// Update server
 	updatedServer := Server{
-		ID:       server.ID,
+		ID:       newID,
 		Host:     newHost,
 		User:     newUser,
 		Name:     newName,
@@ -2408,16 +2702,36 @@ func PromptEditServer(sm *ServerManager) {
 		KeyPath:  newKeyPath,
 	}
 
-	// Replace the server in the list
-	for i, s := range sm.Servers {
-		if s.ID == serverID {
-			sm.Servers[i] = updatedServer
-			break
+	// Handle ID change if needed
+	if idChanged {
+		// Use the UpdateServerID method to handle ID change and jump relation updates
+		if err := sm.UpdateServerID(serverID, newID, jm); err != nil {
+			fmt.Printf("❌ Error updating server ID: %v\n", err)
+			return
+		}
+		
+		// Update the server in the list with new ID
+		for i, s := range sm.Servers {
+			if s.ID == newID {
+				sm.Servers[i] = updatedServer
+				break
+			}
+		}
+	} else {
+		// Just update the server in the list (ID unchanged)
+		for i, s := range sm.Servers {
+			if s.ID == serverID {
+				sm.Servers[i] = updatedServer
+				break
+			}
 		}
 	}
 
 	sm.Save()
 	fmt.Printf("✅ Server '%s' updated successfully!\n", updatedServer.Name)
+	if idChanged {
+		fmt.Printf("🔄 Server ID changed from %d to %d\n", serverID, newID)
+	}
 }
 
 // ExportData exports all server and jump data to a JSON file
@@ -2756,10 +3070,10 @@ func printHelp() {
 	fmt.Println("  sshift                    - Run interactive menu")
 	fmt.Println("  sshift add                - Add new server")
 	fmt.Println("  sshift list               - List all servers")
-	fmt.Println("  sshift delete             - Delete server (interactive)")
-	fmt.Println("  sshift edit               - Edit server (interactive)")
-	fmt.Println("  sshift jump add           - Add jump relation (interactive)")
-	fmt.Println("  sshift jump delete        - Delete jump relation (interactive)")
+	fmt.Println("  sshift delete             - Delete server")
+	fmt.Println("  sshift edit               - Edit server")
+	fmt.Println("  sshift jump add           - Add jump relation")
+	fmt.Println("  sshift jump delete        - Delete jump relation")
 	fmt.Println("  sshift jump list          - List jump relations")
 	fmt.Println("  sshift sort               - Sort server IDs and update jump relations")
 	fmt.Println("  sshift export             - Export data to JSON file")
