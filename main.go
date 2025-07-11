@@ -324,13 +324,15 @@ func (jm *JumpManager) Save() {
 }
 
 func (jm *JumpManager) Add(fromID, toID int) {
-	for i, r := range jm.Relations {
-		if r.FromID == fromID {
-			jm.Relations[i].ToID = toID
-			jm.Save()
+	// Check if this exact relation already exists
+	for _, r := range jm.Relations {
+		if r.FromID == fromID && r.ToID == toID {
+			// Relation already exists, no need to add
 			return
 		}
 	}
+	
+	// Add new relation
 	jm.Relations = append(jm.Relations, JumpRelation{FromID: fromID, ToID: toID})
 	jm.Save()
 }
@@ -677,18 +679,57 @@ func PrintJumpList(jm *JumpManager, sm *ServerManager) {
 		return
 	}
 	
+	// Find the maximum length of server names for proper alignment
+	maxFromLength := len("FROM") // Start with header length
+	maxToLength := len("TO")     // Start with header length
+	
+	for _, r := range jm.Relations {
+		fromServer, fromFound := sm.GetByID(r.FromID)
+		toServer, toFound := sm.GetByID(r.ToID)
+		
+		if fromFound {
+			fromLength := len(fmt.Sprintf("%d) %s", r.FromID, fromServer.Name))
+			if fromLength > maxFromLength {
+				maxFromLength = fromLength
+			}
+		}
+		
+		if toFound {
+			toLength := len(fmt.Sprintf("%d) %s", r.ToID, toServer.Name))
+			if toLength > maxToLength {
+				maxToLength = toLength
+			}
+		}
+	}
+	
+	// Add padding for better alignment
+	maxFromLength += 2
+	maxToLength += 2
+	
 	fmt.Println("\nJump Relations:")
-	fmt.Println("FROM → TO")
-	fmt.Println("-------------")
+	fmt.Printf("%-*s | %s\n", maxFromLength, "FROM", "TO")
+	fmt.Printf("%s-|%s\n", strings.Repeat("-", maxFromLength), strings.Repeat("-", maxToLength+2))
+	
 	for _, r := range jm.Relations {
 		fromServer, fromFound := sm.GetByID(r.FromID)
 		toServer, toFound := sm.GetByID(r.ToID)
 		
 		if fromFound && toFound {
-			fmt.Printf("%s (%d) → %s (%d)\n", 
-				fromServer.Name, r.FromID, toServer.Name, r.ToID)
+			fromStr := fmt.Sprintf("%d) %s", r.FromID, fromServer.Name)
+			toStr := fmt.Sprintf("%d) %s", r.ToID, toServer.Name)
+			fmt.Printf("%-*s | %s\n", maxFromLength, fromStr, toStr)
 		} else {
-			fmt.Printf("%d → %d (server not found)\n", r.FromID, r.ToID)
+			fromName := "Not Found"
+			toName := "Not Found"
+			if fromFound {
+				fromName = fromServer.Name
+			}
+			if toFound {
+				toName = toServer.Name
+			}
+			fromStr := fmt.Sprintf("%d) %s", r.FromID, fromName)
+			toStr := fmt.Sprintf("%d) %s", r.ToID, toName)
+			fmt.Printf("%-*s | %s\n", maxFromLength, fromStr, toStr)
 		}
 	}
 }
