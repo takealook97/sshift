@@ -41,7 +41,8 @@ jobs:
 
       - name: Install Gosec
         run: |
-          go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest
+          # Use specific version to avoid git access issues
+          go install github.com/securecodewarrior/gosec/v2/cmd/gosec@v2.19.0
 
       - name: Run Gosec security scanner
         run: |

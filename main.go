@@ -1387,7 +1387,9 @@ func PromptDeleteJump(jm *JumpManager, sm *ServerManager) {
 				fmt.Printf("❌ Failed to delete jump relation: %v\n", err)
 				return
 			}
-			jm.Save()
+			if err := jm.Save(); err != nil {
+				fmt.Printf("Error saving jump data: %v\n", err)
+			}
 			fmt.Printf("✅ Jump relation '%s' (%d) → '%s' (%d) deleted\n", 
 				fromServer.Name, fromID, toServer.Name, toID)
 		} else {
@@ -1401,7 +1403,9 @@ func PromptDeleteJump(jm *JumpManager, sm *ServerManager) {
 				fmt.Printf("❌ Failed to delete jump relation: %v\n", err)
 				return
 			}
-			jm.Save()
+			if err := jm.Save(); err != nil {
+				fmt.Printf("Error saving jump data: %v\n", err)
+			}
 			fmt.Printf("✅ Jump relation %d → %d deleted\n", fromID, toID)
 		} else {
 			fmt.Println("❌ Deletion cancelled")
@@ -1908,7 +1912,9 @@ func connectWithPasswordJump(fromServer, toServer Server, password string) {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.Run()
+	if err := cmd.Run(); err != nil {
+		fmt.Printf("Error running command: %v\n", err)
+	}
 }
 
 // createSSHClient creates an SSH client with password or key authentication
@@ -2279,7 +2285,9 @@ func printLogo() {
 func main() {
 	homeDir, _ := os.UserHomeDir()
 	baseDir := filepath.Join(homeDir, ".sshift")
-	os.MkdirAll(baseDir, 0755)
+	if err := os.MkdirAll(baseDir, 0755); err != nil {
+		fmt.Printf("Error creating directory: %v\n", err)
+	}
 
 	// Load saved encryption key if available
 	loadEncryptionKeyFromFile(baseDir)
@@ -2373,7 +2381,10 @@ func SortServers(sm *ServerManager, jm *JumpManager) {
 			newToID, toExists := idMapping[toID]
 			
 			if fromExists && toExists {
-				newGraph.AddJump(newFromID, newToID)
+				if err := newGraph.AddJump(newFromID, newToID); err != nil {
+					fmt.Printf("Error adding jump relation %d -> %d: %v\n", newFromID, newToID, err)
+					continue
+				}
 				
 				if fromID != newFromID || toID != newToID {
 					fmt.Printf("  %s: %d%s%d %s %d%s%d\n", 
