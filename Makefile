@@ -23,6 +23,10 @@ build:
 release:
 	@echo "Building release version..."
 	@mkdir -p $(BUILD_DIR)
+	rm -f $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64
+	rm -f $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64
+	rm -f $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64
+	rm -f $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -a -installsuffix cgo -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 main.go
 	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -a -installsuffix cgo -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64 main.go
 	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -a -installsuffix cgo -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64 main.go
