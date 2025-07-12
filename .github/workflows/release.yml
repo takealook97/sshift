@@ -53,12 +53,12 @@ jobs:
         run: |
           go build -ldflags "-X main.Version=${{ github.ref_name }} -s -w" -o ${{ matrix.binary_name }} main.go
 
-            - name: Verify binary
+      - name: Verify binary
         run: |
           echo "🔍 Verifying binary..."
           file ${{ matrix.binary_name }}
           ls -la ${{ matrix.binary_name }}
-          
+
           # Check if binary is executable
           if [[ "${{ matrix.goos }}" == "windows" ]]; then
             echo "Windows binary created successfully"

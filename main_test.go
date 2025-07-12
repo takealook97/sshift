@@ -37,8 +37,9 @@ func TestServerManager(t *testing.T) {
 	}
 
 	// Test server deletion
-	if !sm.DeleteByID(1, jm) {
-		t.Error("Server deletion should succeed")
+	err := sm.DeleteByID(1, jm)
+	if err != nil {
+		t.Errorf("Server deletion should succeed: %v", err)
 	}
 	if len(sm.Servers) != 0 {
 		t.Errorf("Expected 0 servers after deletion, got %d", len(sm.Servers))
@@ -53,8 +54,8 @@ func TestJumpManager(t *testing.T) {
 	// Test jump relation addition
 	jm.Add(1, 2)
 
-	if len(jm.Relations) != 1 {
-		t.Errorf("Expected 1 relation, got %d", len(jm.Relations))
+	if jm.GetJumpCount() != 1 {
+		t.Errorf("Expected 1 relation, got %d", jm.GetJumpCount())
 	}
 
 	// Test jump target retrieval
@@ -68,8 +69,8 @@ func TestJumpManager(t *testing.T) {
 
 	// Test jump relation deletion
 	jm.Delete(1)
-	if len(jm.Relations) != 0 {
-		t.Errorf("Expected 0 relations after deletion, got %d", len(jm.Relations))
+	if jm.GetJumpCount() != 0 {
+		t.Errorf("Expected 0 relations after deletion, got %d", jm.GetJumpCount())
 	}
 }
 
@@ -126,14 +127,14 @@ func TestJumpRelationUpdate(t *testing.T) {
 
 	// Add first relation
 	jm.Add(1, 2)
-	if len(jm.Relations) != 1 {
-		t.Errorf("Expected 1 relation, got %d", len(jm.Relations))
+	if jm.GetJumpCount() != 1 {
+		t.Errorf("Expected 1 relation, got %d", jm.GetJumpCount())
 	}
 
 	// Add different toID with same fromID (update)
 	jm.Add(1, 3)
-	if len(jm.Relations) != 1 {
-		t.Errorf("Expected 1 relation after update, got %d", len(jm.Relations))
+	if jm.GetJumpCount() != 1 {
+		t.Errorf("Expected 1 relation after update, got %d", jm.GetJumpCount())
 	}
 
 	target, exists := jm.GetJumpTarget(1)
