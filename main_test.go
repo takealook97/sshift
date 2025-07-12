@@ -2,6 +2,7 @@ package main
 
 import (
 	"testing"
+	"time"
 )
 
 func TestServerManager(t *testing.T) {
@@ -195,5 +196,81 @@ func TestSortServers(t *testing.T) {
 	}
 	if target != 3 {
 		t.Errorf("Expected jump target 3, got %d", target)
+	}
+}
+
+// Performance benchmarks
+func BenchmarkServerManagerAdd(b *testing.B) {
+	tempDir := b.TempDir()
+	sm := NewServerManager(tempDir)
+	
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		server := Server{
+			Host: "192.168.1.100",
+			User: "admin",
+			Name: "Test Server",
+		}
+		sm.Add(server)
+	}
+}
+
+func BenchmarkJumpManagerAdd(b *testing.B) {
+	tempDir := b.TempDir()
+	jm := NewJumpManager(tempDir)
+	
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		jm.Add(i, i+1)
+	}
+}
+
+func BenchmarkEncryption(b *testing.B) {
+	password := "test-password-123"
+	
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		encrypted, err := EncryptPassword(password)
+		if err != nil {
+			b.Fatal(err)
+		}
+		_, err = DecryptPassword(encrypted)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkMemory(b *testing.B) {
+	tempDir := b.TempDir()
+	sm := NewServerManager(tempDir)
+	jm := NewJumpManager(tempDir)
+	
+	// Pre-allocate servers
+	servers := make([]Server, 100)
+	for i := range servers {
+		servers[i] = Server{
+			Host: "192.168.1.100",
+			User: "admin",
+			Name: "Test Server",
+		}
+	}
+	
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// Add servers
+		for _, server := range servers {
+			sm.Add(server)
+		}
+		
+		// Add jump relations
+		for j := 0; j < len(servers)-1; j++ {
+			jm.Add(j+1, j+2)
+		}
+		
+		// Clear for next iteration
+		sm.Servers = sm.Servers[:0]
+		jm.Graph.AdjacencyList = make(map[int][]int)
+		jm.Graph.ReverseList = make(map[int][]int)
 	}
 } 

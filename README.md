@@ -1,5 +1,13 @@
 # SSHift - SSH Server Management Tool
 
+```
+              __    _ ______
+   __________/ /_  (_) __/ /_______________________
+  / ___/ ___/ __ \/ / /_/ __/________________
+ (__  |__  ) / / / / __/ /_____________
+/____/____/_/ /_/_/_/  \__/______
+```
+
 SSHift is a powerful Go-based CLI tool for managing SSH servers with advanced features including jump server support, encrypted password storage, and an interactive menu system.
 
 ## 🚀 Features
@@ -16,47 +24,47 @@ SSHift is a powerful Go-based CLI tool for managing SSH servers with advanced fe
 - **📊 Organized Display**: Servers and jump relations automatically sorted by ID for better organization
 - **🎯 Consistent UI**: Unified prompt style with 🔍 emoji and proper table formatting
 
-## 📦 Installation
+## 🚀 Installation
 
-### Prerequisites
+### Quick Install (Recommended)
 
-- Go 1.24 or higher
-- SSH client
-- macOS, Linux, or Windows (WSL)
+```bash
+# One-line installation (auto-detects OS/ARCH)
+curl -fsSL https://raw.githubusercontent.com/takealook97/sshift/main/install.sh | bash
+
+# Uninstall
+curl -fsSL https://raw.githubusercontent.com/takealook97/sshift/main/install.sh | bash -s uninstall
+```
+
+### Homebrew (macOS/Linux)
+
+```bash
+brew install takealook97/sshift/sshift
+```
+
+### Manual Download
+
+1. Download the binary for your OS/architecture from [GitHub Releases](https://github.com/takealook97/sshift/releases)
+2. Make it executable: `chmod +x sshift`
+3. Move to your PATH: `sudo mv sshift /usr/local/bin/`
 
 ### Build from Source
 
 ```bash
-# Clone repository
 git clone https://github.com/takealook97/sshift.git
 cd sshift
-
-# Install dependencies
-go mod tidy
-
-# Build
-go build -o sshift
-
-# Install globally (optional)
-sudo cp sshift /usr/local/bin/
+go build -o sshift main.go
+sudo mv sshift /usr/local/bin/
 ```
 
-### Install via Homebrew
+---
 
-```bash
-# Add custom tap
-brew tap takealook97/sshift
+## ⚙️ Build & Release Automation
 
-# Install SSHift
-brew install sshift
-```
-
-### Install via Homebrew (Alternative)
-
-```bash
-# Install directly from Formula
-brew install takealook97/sshift/sshift
-```
+- All platform binaries are built and uploaded automatically by **GitHub Actions (Ubuntu environment)**.
+- Users can simply download the right file from Releases without worrying about the build environment.
+- Homebrew, install script, and manual download all use the same Release binaries.
+- You can check the latest automation status in the [Actions tab](https://github.com/takealook97/sshift/actions).
 
 ## 🎯 Usage
 
@@ -103,16 +111,10 @@ sshift help         # Show help
 When you run `sshift` without arguments, you'll see an interactive menu:
 
 ```
-              __    _ ______
-   __________/ /_  (_) __/ /_______________________
-  / ___/ ___/ __ \/ / /_/ __/________________
- (__  |__  ) / / / / __/ /_____________
-/____/____/_/ /_/_/_/  \__/______
-
 Welcome to SSHift! 🚀
 
  ID | SERVER NAME                    | IP              | USER      | AUTH
------|-------------------------------|----------------|----------|------
+----|--------------------------------|-----------------|-----------|------
  1) | Web Server                     | 192.168.1.100   | admin     | pass
  2) | Database                       | 192.168.1.101   | root      | pem
  3) | Backup Server                  | 192.168.1.102   | user      | Key
@@ -131,7 +133,7 @@ $ sshift add
 Current servers:
 
  ID | SERVER NAME                    | IP              | USER      | AUTH
------|-------------------------------|----------------|----------|------
+----|--------------------------------|-----------------|-----------|------
  1) | Web Server                     | 192.168.1.100   | admin     | pass
  2) | Database                       | 192.168.1.101   | root      | pem
 
@@ -190,7 +192,11 @@ SSHift uses AES-256-CFB encryption for password storage:
 
 ### Authentication Methods
 
-1. **Password Authentication**: Encrypted storage with confirmation and basic validation
+1. **Password Authentication**:
+   - Encrypted storage with confirmation and basic validation
+   - Automatic password input using `sshpass` (if available)
+   - Fallback to Go's SSH package for interactive password input
+   - Secure memory handling with automatic clearing
 2. **SSH Key Authentication**: Uses default SSH keys or custom key paths with permission validation
 3. **PEM File Authentication**: Support for custom private key files
 
@@ -207,12 +213,20 @@ SSHift uses AES-256-CFB encryption for password storage:
 # View current encryption key info
 sshift key
 
-# Setup custom encryption key
+# Setup custom encryption key (with data migration)
 sshift setup
 
 # Set environment variable for cross-system use
 export SSHIFT_ENCRYPTION_KEY='your-32-character-secret-key'
 ```
+
+**Important Notes:**
+
+- **System Auto-Generated Key**: Consistent key generation on the same system
+- **Custom Key**: Automatically saved to permanent storage
+- **Data Migration**: Existing encrypted passwords are automatically migrated when changing keys
+- **Cross-System Sharing**: Use custom keys for sharing data between systems
+- **Export/Import Compatibility**: Same encryption key required for importing encrypted passwords
 
 ## 📁 Data Structure
 
@@ -252,6 +266,13 @@ export SSHIFT_ENCRYPTION_KEY='your-32-character-secret-key'
   "jump_relations": [...]
 }
 ```
+
+**Security Information:**
+
+- **Encrypted Passwords**: Passwords remain encrypted in export files
+- **Key Dependency**: Import requires the same encryption key used during export
+- **File Permissions**: Export files use 0600 permissions (owner read/write only)
+- **Storage Location**: Files stored in `~/.ssh/` directory for security consistency
 
 ## 🔧 Configuration
 
@@ -329,6 +350,13 @@ sshift import
 # Interactive file selection and preview
 ```
 
+**⚠️ Important Security Note:**
+
+- **Encryption Key Requirement**: Imported data with encrypted passwords requires the **same encryption key** used during export
+- **Cross-System Import**: Use custom encryption keys (`sshift setup`) for sharing data between systems
+- **System Auto-Generated Keys**: Cannot be shared between different systems (system-specific)
+- **Password Recovery**: If encryption keys don't match, passwords will be inaccessible and need to be re-entered
+
 ### Server Management
 
 ```bash
@@ -364,6 +392,9 @@ sshift list
    - Run `sshift setup` to configure encryption key
    - Check if `SSHIFT_ENCRYPTION_KEY` is set correctly
    - Verify system-specific key generation
+   - If changing keys, ensure data migration completed successfully
+   - **For imported data**: Ensure the same encryption key is used as during export
+   - **Cross-system import**: Use custom encryption keys instead of system auto-generated keys
 
 2. **Jump Server Connection Issues**
 
@@ -383,7 +414,14 @@ sshift list
    - Fix SSH key permissions: `chmod 600 ~/.ssh/your_key`
    - SSHift validates key file permissions for security
 
-5. **Table Formatting Issues**
+5. **Password Authentication Issues**
+
+   - Install `sshpass` for automatic password input: `brew install sshpass` (macOS) or `apt install sshpass` (Ubuntu)
+   - Without `sshpass`, passwords will be prompted interactively
+   - Check if password is correctly encrypted and decrypted
+   - Verify encryption key is consistent across sessions
+
+6. **Table Formatting Issues**
    - Table separators automatically align with content
    - Server lists are sorted by ID for consistent display
    - Jump relations are organized by FROM/TO ID order

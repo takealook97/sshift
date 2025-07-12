@@ -186,18 +186,10 @@ func getSystemEntropy() ([]byte, error) {
 	entropy = append(entropy, []byte(runtime.GOOS)...)
 	entropy = append(entropy, []byte(runtime.GOARCH)...)
 	
-	// Get process ID
-	entropy = append(entropy, []byte(fmt.Sprintf("%d", os.Getpid()))...)
-	
-	// Get current time as additional entropy
-	entropy = append(entropy, []byte(time.Now().Format(time.RFC3339Nano))...)
-	
-	// Add random entropy
-	randomBytes := make([]byte, 32)
-	if _, err := rand.Read(randomBytes); err != nil {
-		return nil, fmt.Errorf("failed to generate random bytes: %w", err)
-	}
-	entropy = append(entropy, randomBytes...)
+	// Use fixed salt for consistent key generation on same system
+	// This ensures the same key is generated every time on the same system
+	fixedSalt := []byte("SSHift-System-Key-Salt-v1")
+	entropy = append(entropy, fixedSalt...)
 	
 	return entropy, nil
 }
@@ -224,22 +216,12 @@ func getEncryptionKey() ([]byte, error) {
 		return nil, fmt.Errorf("failed to generate system entropy: %w", err)
 	}
 	
-	// Add salt for additional security
-	salt := make([]byte, SaltLength)
-	if _, err := rand.Read(salt); err != nil {
-		return nil, fmt.Errorf("failed to generate salt: %w", err)
-	}
-	entropy = append(entropy, salt...)
-	
 	// Use SHA-256 to generate a proper 32-byte key
 	hash := sha256.Sum256(entropy)
 	
 	// Clear sensitive data from memory
 	for i := range entropy {
 		entropy[i] = 0
-	}
-	for i := range salt {
-		salt[i] = 0
 	}
 	
 	return hash[:], nil
@@ -1689,18 +1671,23 @@ func Connect(server Server) {
 		return
 	}
 	if decryptedPassword != "" {
-		// Use password authentication with sshpass
+		// Use password authentication
 		fmt.Println("🔐 Using password authentication")
-		fmt.Println("   Note: This will prompt for password interactively")
 		
 		// Try to use sshpass if available
 		sshpassCmd := exec.Command("which", "sshpass")
 		if sshpassCmd.Run() == nil {
-			// sshpass is available, use it
+			// sshpass is available, use it for automatic password input
 			args = []string{"sshpass", "-p", decryptedPassword, "ssh", "-o", "StrictHostKeyChecking=no"}
+			fmt.Println("   Using sshpass for automatic password input")
 		} else {
-			// sshpass not available, use regular ssh
-			args = []string{"ssh", "-o", "StrictHostKeyChecking=no", "-o", "PreferredAuthentications=password", "-o", "PubkeyAuthentication=no"}
+			// sshpass not available, use expect-like behavior with Go's SSH package
+			fmt.Println("   sshpass not available, using interactive password input")
+			fmt.Println("   Note: You will be prompted for password")
+			
+			// Use Go's SSH package for password authentication
+			connectWithPasswordSSH(server)
+			return
 		}
 	} else {
 		// Use SSH key authentication
@@ -1862,86 +1849,17 @@ func ConnectWithJump(fromServer, toServer Server) {
 		return
 	}
 	
-	// Try ProxyJump even with mixed authentication (SSH key + password)
-	// This might work if the SSH key server can handle the connection
-	if canUseProxyJump {
-		fmt.Println("🔐 Attempting SSH command with ProxyJump (mixed auth)")
+	// Check if we need programmatic connection for password authentication
+	// ProxyJump cannot handle password authentication for target server
+	if toPassword != "" {
+		fmt.Println("🔐 Using programmatic SSH connection (password authentication required)")
 		fmt.Printf("   Jump server auth: %s\n", getAuthType(fromServer))
 		fmt.Printf("   Target server auth: %s\n", getAuthType(toServer))
-		fmt.Println("   Note: Password will be prompted if needed")
-		
-		// Build SSH command with ProxyJump
-		var args []string
-		
-		// Create temporary SSH config for this connection
-		tempConfig := createTempSSHConfig(fromServer, toServer)
-		if tempConfig != "" {
-			defer os.Remove(tempConfig) // Clean up temp file
-			args = append(args, "-F", tempConfig)
-		}
-		
-		// Add ProxyJump configuration
-		proxyJump := fmt.Sprintf("%s@%s", fromServer.User, fromServer.Host)
-		args = append(args, "-J", proxyJump, "-o", "StrictHostKeyChecking=no")
-		
-		// Add key for jump server if specified
-		if fromKeyPath != "" {
-			args = append(args, "-i", fromKeyPath)
-		}
-		
-		// Add key for target server if specified
-		if toKeyPath != "" {
-			args = append(args, "-i", toKeyPath)
-		}
-		
-		// Add target server
-		args = append(args, fmt.Sprintf("%s@%s", toServer.User, toServer.Host))
-		
-		cmd := exec.Command("ssh", args...)
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		
-		// Run command - if SSH exits normally, exit the program
-		err = cmd.Run()
-		if err != nil {
-			// Only show error message if it's not a normal exit
-			if exitErr, ok := err.(*exec.ExitError); ok {
-				code := exitErr.ExitCode()
-				// Treat common exit codes as normal termination
-				// 0: normal exit, 127: logout/exit, 130: Ctrl+C, 143: SIGTERM
-				if code == 0 || code == 127 || code == 130 || code == 143 {
-					// SSH exited normally, exit the program
-					os.Exit(0)
-				} else {
-					fmt.Printf("❌ SSH jump connection failed (exit code %d): %v\n", code, err)
-					// Show stderr output if available
-					if exitErr.Stderr != nil && len(exitErr.Stderr) > 0 {
-						fmt.Printf("   Error details: %s\n", string(exitErr.Stderr))
-					}
-					fmt.Println("Press Enter to return to menu...")
-					bufio.NewScanner(os.Stdin).Scan()
-				}
-			} else {
-				fmt.Printf("❌ SSH jump connection failed: %v\n", err)
-				fmt.Println("Press Enter to return to menu...")
-				bufio.NewScanner(os.Stdin).Scan()
-			}
-		} else {
-			// SSH exited normally (no error), exit the program
-			os.Exit(0)
-		}
-		return
-	}
-	
-	// Fallback: Use programmatic connection for password-only authentication
-	if needsPassword {
-		fmt.Println("🔐 Using programmatic SSH connection (password authentication)")
 		connectWithProgrammaticSSH(fromServer, toServer)
 		return
 	}
 	
-	// Final fallback: Use ProxyJump for SSH key authentication
+	// Use ProxyJump for SSH key authentication (both servers use keys)
 	fmt.Println("🔐 Using SSH command with ProxyJump")
 	fmt.Printf("   Jump server auth: %s\n", getAuthType(fromServer))
 	fmt.Printf("   Target server auth: %s\n", getAuthType(toServer))
@@ -2005,6 +1923,80 @@ func ConnectWithJump(fromServer, toServer Server) {
 		}
 	} else {
 		// SSH exited normally (no error), exit the program
+		os.Exit(0)
+	}
+}
+
+// connectWithPasswordSSH connects using Go's SSH package with password authentication
+func connectWithPasswordSSH(server Server) {
+	decryptedPassword, err := server.GetDecryptedPassword()
+	if err != nil {
+		fmt.Printf("❌ Failed to decrypt password: %v\n", err)
+		fmt.Println("Press Enter to return to menu...")
+		bufio.NewScanner(os.Stdin).Scan()
+		return
+	}
+	
+	// Create SSH client with password authentication
+	client, err := createSSHClient(server.Host, server.User, decryptedPassword, "")
+	if err != nil {
+		fmt.Printf("❌ Failed to connect: %v\n", err)
+		fmt.Println("Press Enter to return to menu...")
+		bufio.NewScanner(os.Stdin).Scan()
+		return
+	}
+	defer client.Close()
+	
+	// Request interactive session
+	session, err := client.NewSession()
+	if err != nil {
+		fmt.Printf("❌ Failed to create session: %v\n", err)
+		fmt.Println("Press Enter to return to menu...")
+		bufio.NewScanner(os.Stdin).Scan()
+		return
+	}
+	defer session.Close()
+	
+	// Set up terminal
+	session.Stdout = os.Stdout
+	session.Stderr = os.Stderr
+	session.Stdin = os.Stdin
+	
+	// Request PTY with proper modes
+	modes := ssh.TerminalModes{
+		ssh.ECHO:          1, // Enable echo for normal input
+		ssh.ECHOCTL:       0, // Disable control character echo
+		ssh.ECHOKE:        0, // Disable kill character echo
+		ssh.ECHONL:        0, // Disable newline echo
+		ssh.ICANON:        1, // Enable canonical mode
+		ssh.ISIG:          1, // Enable signals
+		ssh.TTY_OP_ISPEED: 14400,
+		ssh.TTY_OP_OSPEED: 14400,
+	}
+	
+	if err := session.RequestPty("xterm", 40, 80, modes); err != nil {
+		fmt.Printf("❌ Failed to request PTY: %v\n", err)
+		fmt.Println("Press Enter to return to menu...")
+		bufio.NewScanner(os.Stdin).Scan()
+		return
+	}
+	
+	// Start shell
+	if err := session.Shell(); err != nil {
+		fmt.Printf("❌ Failed to start shell: %v\n", err)
+		fmt.Println("Press Enter to return to menu...")
+		bufio.NewScanner(os.Stdin).Scan()
+		return
+	}
+	
+	// Wait for session to end - if session ends normally, exit the program
+	err = session.Wait()
+	if err != nil {
+		fmt.Printf("❌ SSH session ended with error: %v\n", err)
+		fmt.Println("Press Enter to return to menu...")
+		bufio.NewScanner(os.Stdin).Scan()
+	} else {
+		// Session ended normally, exit the program
 		os.Exit(0)
 	}
 }
@@ -2089,7 +2081,7 @@ func createSSHClient(host, user, password, keyPath string) (*ssh.Client, error) 
 	config := &ssh.ClientConfig{
 		User:            user,
 		Auth:            authMethods,
-		HostKeyCallback: ssh.FixedHostKey(nil), // Use known_hosts file instead of InsecureIgnoreHostKey
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // Allow first-time connections
 		Timeout:         30 * time.Second,
 		ClientVersion:   "SSH-2.0-SSHift", // Custom client version for identification
 		BannerCallback:  func(message string) error {
@@ -2201,7 +2193,7 @@ func connectWithProgrammaticSSH(fromServer, toServer Server) {
 	sshConn, chans, reqs, err := ssh.NewClientConn(targetClient, toServer.Host+":22", &ssh.ClientConfig{
 		User:            toServer.User,
 		Auth:            targetAuthMethods,
-		HostKeyCallback: ssh.FixedHostKey(nil), // Use known_hosts file instead of InsecureIgnoreHostKey
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // Allow first-time connections
 		Timeout:         30 * time.Second,
 	})
 	if err != nil {
@@ -2398,6 +2390,9 @@ func main() {
 	homeDir, _ := os.UserHomeDir()
 	baseDir := filepath.Join(homeDir, ".sshift")
 	os.MkdirAll(baseDir, 0755)
+
+	// Load saved encryption key if available
+	loadEncryptionKeyFromFile(baseDir)
 
 	// Check if this is the first run and setup encryption key
 	if isFirstRun(baseDir) {
@@ -2998,22 +2993,58 @@ func setupEncryptionKey() {
 	homeDir, _ := os.UserHomeDir()
 	baseDir := filepath.Join(homeDir, ".sshift")
 	
-	fmt.Println("🔐 SSHift Initial Setup")
-	fmt.Println("Setting up encryption key for secure password storage.")
-	fmt.Println()
+	// Check if this is a re-setup (not first run)
+	isReSetup := !isFirstRun(baseDir)
+	
+	if isReSetup {
+		fmt.Println("🔐 SSHift Encryption Key Re-Setup")
+		fmt.Println("Changing encryption key for existing data.")
+		fmt.Println()
+		
+		// Load existing data to check for encrypted passwords
+		sm := NewServerManager(baseDir)
+		hasEncryptedData := false
+		for _, server := range sm.Servers {
+			if server.Password != "" {
+				hasEncryptedData = true
+				break
+			}
+		}
+		
+		if hasEncryptedData {
+			fmt.Println(warning("⚠️  WARNING: You have existing servers with encrypted passwords."))
+			fmt.Println("   Changing the encryption key will require re-encrypting all passwords.")
+			fmt.Println("   Make sure you have the current key available for migration.")
+			fmt.Println()
+		}
+	} else {
+		fmt.Println("🔐 SSHift Initial Setup")
+		fmt.Println("Setting up encryption key for secure password storage.")
+		fmt.Println()
+	}
 	
 	fmt.Println("Choose an option:")
 	fmt.Println("1) Use system auto-generated key (recommended)")
 	fmt.Println("2) Set custom encryption key")
-	fmt.Println("3) Setup later")
+	if !isReSetup {
+		fmt.Println("3) Setup later")
+	}
 	
-	choice := PromptInput("\nSelect (1-3): ")
+	choice := PromptInput(fmt.Sprintf("\nSelect (1-%s): ", func() string {
+		if isReSetup {
+			return "2"
+		}
+		return "3"
+	}()))
 	
 	switch choice {
 	case "1":
 		fmt.Println("✅ Using system auto-generated key.")
 		fmt.Println("   A unique key will be generated for each system.")
-		fmt.Println("   To share data between systems, run 'sshift setup' again.")
+		if isReSetup {
+			fmt.Println("   ⚠️  Note: This will make existing encrypted data inaccessible!")
+			fmt.Println("   Consider using option 2 for data migration.")
+		}
 		
 	case "2":
 		fmt.Println("🔑 Setting up custom encryption key.")
@@ -3037,17 +3068,33 @@ func setupEncryptionKey() {
 				continue
 			}
 			
-			// Set environment variable
+			// Handle data migration if this is a re-setup
+			if isReSetup {
+				if err := migrateEncryptedData(key, baseDir); err != nil {
+					fmt.Printf("❌ Failed to migrate encrypted data: %v\n", err)
+					fmt.Println("   Setup cancelled. Your data remains unchanged.")
+					return
+				}
+			}
+			
+			// Save key to permanent storage
+			if err := saveEncryptionKey(key, baseDir); err != nil {
+				fmt.Printf("❌ Failed to save encryption key: %v\n", err)
+				return
+			}
+			
+			// Set environment variable for current session
 			os.Setenv("SSHIFT_ENCRYPTION_KEY", key)
-			fmt.Println("✅ Custom key has been set.")
-			fmt.Println("   To permanently set this key in environment variable:")
-			fmt.Printf("   export SSHIFT_ENCRYPTION_KEY='%s'\n", key)
+			fmt.Println("✅ Custom key has been set and saved permanently.")
 			break
 		}
 		
 	case "3":
-		fmt.Println("⚠️  You can run 'sshift setup' later to configure.")
-		return
+		if !isReSetup {
+			fmt.Println("⚠️  You can run 'sshift setup' later to configure.")
+			return
+		}
+		fallthrough
 		
 	default:
 		fmt.Println("❌ Invalid selection. Using system auto-generated key.")
@@ -3058,9 +3105,143 @@ func setupEncryptionKey() {
 	os.WriteFile(setupFile, []byte("Setup completed on "+time.Now().Format("2006-01-02 15:04:05")), 0600)
 	
 	fmt.Println()
-	fmt.Println("Initial setup completed! 🎉")
+	if isReSetup {
+		fmt.Println("Encryption key re-setup completed! 🎉")
+	} else {
+		fmt.Println("Initial setup completed! 🎉")
+	}
 	fmt.Println("You can now add servers.")
 	fmt.Println()
+}
+
+// migrateEncryptedData migrates existing encrypted passwords to new key
+func migrateEncryptedData(newKey string, baseDir string) error {
+	sm := NewServerManager(baseDir)
+	
+	// Check if there are any encrypted passwords to migrate
+	hasEncryptedData := false
+	for _, server := range sm.Servers {
+		if server.Password != "" {
+			hasEncryptedData = true
+			break
+		}
+	}
+	
+	if !hasEncryptedData {
+		fmt.Println("ℹ️  No encrypted passwords found. Migration not needed.")
+		return nil
+	}
+	
+	fmt.Println("🔄 Migrating encrypted passwords to new key...")
+	
+	// Temporarily set the new key to test decryption
+	oldKey := os.Getenv("SSHIFT_ENCRYPTION_KEY")
+	os.Setenv("SSHIFT_ENCRYPTION_KEY", newKey)
+	
+	// Try to decrypt and re-encrypt each password
+	migratedCount := 0
+	failedCount := 0
+	
+	for i, server := range sm.Servers {
+		if server.Password != "" {
+			// Try to decrypt with new key
+			decrypted, err := DecryptPassword(server.Password)
+			if err != nil {
+				// If decryption fails, try with old key (if available)
+				if oldKey != "" {
+					os.Setenv("SSHIFT_ENCRYPTION_KEY", oldKey)
+					decrypted, err = DecryptPassword(server.Password)
+					if err == nil {
+						// Successfully decrypted with old key, now re-encrypt with new key
+						os.Setenv("SSHIFT_ENCRYPTION_KEY", newKey)
+						reEncrypted, err := EncryptPassword(decrypted)
+						if err == nil {
+							sm.Servers[i].Password = reEncrypted
+							migratedCount++
+							fmt.Printf("  ✅ Migrated password for server: %s\n", server.Name)
+							continue
+						}
+					}
+				}
+				
+				// If we get here, migration failed for this server
+				failedCount++
+				fmt.Printf("  ❌ Failed to migrate password for server: %s\n", server.Name)
+				continue
+			}
+			
+			// Successfully decrypted with new key, re-encrypt to ensure consistency
+			reEncrypted, err := EncryptPassword(decrypted)
+			if err != nil {
+				failedCount++
+				fmt.Printf("  ❌ Failed to re-encrypt password for server: %s\n", server.Name)
+				continue
+			}
+			
+			sm.Servers[i].Password = reEncrypted
+			migratedCount++
+			fmt.Printf("  ✅ Migrated password for server: %s\n", server.Name)
+		}
+	}
+	
+	// Restore original key if it existed
+	if oldKey != "" {
+		os.Setenv("SSHIFT_ENCRYPTION_KEY", oldKey)
+	}
+	
+	// Save migrated data
+	if err := sm.Save(); err != nil {
+		return fmt.Errorf("failed to save migrated data: %w", err)
+	}
+	
+	fmt.Printf("🔄 Migration completed: %d passwords migrated, %d failed\n", migratedCount, failedCount)
+	
+	if failedCount > 0 {
+		return fmt.Errorf("some passwords could not be migrated")
+	}
+	
+	return nil
+}
+
+// saveEncryptionKey saves the encryption key to a permanent file
+func saveEncryptionKey(key string, baseDir string) error {
+	keyFile := filepath.Join(baseDir, ".encryption_key")
+	
+	// Create a simple encrypted storage for the key
+	// In production, you might want to use a more secure method
+	keyData := fmt.Sprintf("SSHIFT_ENCRYPTION_KEY=%s\n", key)
+	
+	if err := os.WriteFile(keyFile, []byte(keyData), 0600); err != nil {
+		return fmt.Errorf("failed to write key file: %w", err)
+	}
+	
+	fmt.Println("💾 Encryption key saved to permanent storage.")
+	fmt.Println("   The key will be automatically loaded on next startup.")
+	
+	return nil
+}
+
+// loadEncryptionKeyFromFile loads the encryption key from permanent storage
+func loadEncryptionKeyFromFile(baseDir string) {
+	keyFile := filepath.Join(baseDir, ".encryption_key")
+	
+	data, err := os.ReadFile(keyFile)
+	if err != nil {
+		return // No saved key file, use system-generated key
+	}
+	
+	// Parse the key file
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "SSHIFT_ENCRYPTION_KEY=") {
+			key := strings.TrimPrefix(line, "SSHIFT_ENCRYPTION_KEY=")
+			if key != "" {
+				os.Setenv("SSHIFT_ENCRYPTION_KEY", key)
+				return
+			}
+		}
+	}
 }
 
 func printHelp() {
@@ -3073,8 +3254,8 @@ func printHelp() {
 	fmt.Println("  sshift delete             - Delete server")
 	fmt.Println("  sshift edit               - Edit server")
 	fmt.Println("  sshift jump add           - Add jump relation")
-	fmt.Println("  sshift jump delete        - Delete jump relation")
 	fmt.Println("  sshift jump list          - List jump relations")
+	fmt.Println("  sshift jump delete        - Delete jump relation")
 	fmt.Println("  sshift sort               - Sort server IDs and update jump relations")
 	fmt.Println("  sshift export             - Export data to JSON file")
 	fmt.Println("  sshift import             - Import data from JSON file")

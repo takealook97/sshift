@@ -1,0 +1,54 @@
+name: Security Scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # 매주 월요일 오전 9시에 실행
+    - cron: "0 9 * * 1"
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: "fs"
+          scan-ref: "."
+          format: "sarif"
+          output: "trivy-results.sarif"
+          severity: "CRITICAL,HIGH"
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: "trivy-results.sarif"
+
+      - name: Run Gosec security scanner
+        uses: securecodewarrior/github-action-gosec@master
+        with:
+          args: "-fmt sarif -out gosec-results.sarif ./..."
+
+      - name: Upload Gosec scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: "gosec-results.sarif"
+
+      - name: Check for vulnerabilities
+        run: |
+          if [ -f trivy-results.sarif ]; then
+            VULNERABILITIES=$(grep -c '"level":"error"' trivy-results.sarif || echo "0")
+            if [ "$VULNERABILITIES" -gt 0 ]; then
+              echo "❌ Found $VULNERABILITIES critical/high vulnerabilities"
+              exit 1
+            fi
+          fi
+          echo "✅ No critical/high vulnerabilities found"

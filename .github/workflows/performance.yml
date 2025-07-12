@@ -1,0 +1,62 @@
+name: Performance Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # 매주 화요일 오전 10시에 실행
+    - cron: "0 10 * * 2"
+
+jobs:
+  performance:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.24"
+
+      - name: Install dependencies
+        run: go mod download
+
+      - name: Run performance benchmarks
+        run: |
+          echo "🔍 Running performance benchmarks..."
+          go test -bench=. -benchmem -benchtime=5s ./... > benchmark-results.txt
+
+          echo "📊 Benchmark Results:"
+          cat benchmark-results.txt
+
+          # 성능 임계값 검사 (예시)
+          if grep -q "Benchmark.*[0-9]\{4,\}ns/op" benchmark-results.txt; then
+            echo "⚠️ Warning: Some operations are taking longer than expected"
+          else
+            echo "✅ Performance benchmarks passed"
+          fi
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: benchmark-results.txt
+          retention-days: 30
+
+      - name: Memory usage test
+        run: |
+          echo "🧠 Testing memory usage..."
+          go test -bench=BenchmarkMemory -benchmem -benchtime=10s ./... > memory-results.txt
+
+          echo "📊 Memory Usage Results:"
+          cat memory-results.txt
+
+      - name: Upload memory results
+        uses: actions/upload-artifact@v4
+        with:
+          name: memory-results
+          path: memory-results.txt
+          retention-days: 30
