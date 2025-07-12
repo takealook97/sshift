@@ -29,7 +29,6 @@ jobs:
           cd homebrew-tap
           sed -i "s/version \".*\"/version \"${{ steps.sha256.outputs.version }}\"/" sshift.rb
           sed -i "s/sha256 \".*\"/sha256 \"${{ steps.sha256.outputs.sha256 }}\"/" sshift.rb
-          sed -i "s|url \".*\"|url \"https://github.com/takealook97/sshift/archive/refs/tags/${{ github.ref_name }}.tar.gz\"|" sshift.rb
 
       - name: Commit and push
         run: |

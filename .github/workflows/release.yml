@@ -126,7 +126,6 @@ jobs:
         run: |
           # Update version and SHA256 in Formula
           sed -i "s/version \"[^\"]*\"/version \"$VERSION\"/" Formula/sshift.rb
-          sed -i "s|url \"[^\"]*\"|url \"https://github.com/${{ github.repository }}/archive/refs/tags/${VERSION}.tar.gz\"|" Formula/sshift.rb
           sed -i "s/sha256 \"[^\"]*\"/sha256 \"$SHA256\"/" Formula/sshift.rb
 
       - name: Test Formula
