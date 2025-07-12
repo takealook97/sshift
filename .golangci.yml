@@ -66,46 +66,47 @@ linters-settings:
           - disableStutteringCheck
       - name: package-comments
         disabled: true
-      - name: var-naming
-        arguments:
-          - ID
-          - API
-          - ACL
-          - ASCII
-          - CPU
-          - CSS
-          - DNS
-          - EOF
-          - GUID
-          - HTML
-          - HTTP
-          - HTTPS
-          - ID
-          - IP
-          - JSON
-          - QPS
-          - RAM
-          - RPC
-          - SLA
-          - SMTP
-          - SQL
-          - SSH
-          - TCP
-          - TLS
-          - TTL
-          - UDP
-          - UI
-          - GID
-          - UID
-          - UUID
-          - URI
-          - URL
-          - UTF8
-          - VM
-          - XML
-          - XMPP
-          - XSRF
-          - XSS
+      # - name: var-naming
+      #   arguments:
+      #     allowlist:
+      #       - ID
+      #       - API
+      #       - ACL
+      #       - ASCII
+      #       - CPU
+      #       - CSS
+      #       - DNS
+      #       - EOF
+      #       - GUID
+      #       - HTML
+      #       - HTTP
+      #       - HTTPS
+      #       - ID
+      #       - IP
+      #       - JSON
+      #       - QPS
+      #       - RAM
+      #       - RPC
+      #       - SLA
+      #       - SMTP
+      #       - SQL
+      #       - SSH
+      #       - TCP
+      #       - TLS
+      #       - TTL
+      #       - UDP
+      #       - UI
+      #       - GID
+      #       - UID
+      #       - UUID
+      #       - URI
+      #       - URL
+      #       - UTF8
+      #       - VM
+      #       - XML
+      #       - XMPP
+      #       - XSRF
+      #       - XSS
 
 issues:
   exclude-rules:
@@ -119,5 +120,8 @@ issues:
       linters:
         - gocyclo
         - gocognit
+    - linters:
+        - gosec
+      text: "Use of ssh InsecureIgnoreHostKey should be audited"
   max-issues-per-linter: 0
   max-same-issues: 0

@@ -5,6 +5,7 @@ import (
 )
 
 func TestServerManager(t *testing.T) {
+	t.Parallel()
 	// Create temporary directory
 	tempDir := t.TempDir()
 	sm := NewServerManager(tempDir)
@@ -17,6 +18,7 @@ func TestServerManager(t *testing.T) {
 		Name:     "Test Server",
 		Password: "testpassword123",
 	}
+
 	err := sm.Add(server)
 	if err != nil {
 		t.Fatalf("Failed to add server: %v", err)
@@ -35,6 +37,7 @@ func TestServerManager(t *testing.T) {
 	if !exists {
 		t.Error("Server should exist")
 	}
+
 	if found.Host != "192.168.1.100" {
 		t.Errorf("Expected host 192.168.1.100, got %s", found.Host)
 	}
@@ -44,12 +47,14 @@ func TestServerManager(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to delete server1: %v", err)
 	}
+
 	if len(sm.Servers) != 0 {
 		t.Errorf("Expected 0 servers after deletion, got %d", len(sm.Servers))
 	}
 }
 
 func TestJumpManager(t *testing.T) {
+	t.Parallel()
 	// Create temporary directory
 	tempDir := t.TempDir()
 	jm := NewJumpManager(tempDir)
@@ -69,6 +74,7 @@ func TestJumpManager(t *testing.T) {
 	if !exists {
 		t.Error("Jump target should exist")
 	}
+
 	if target != 2 {
 		t.Errorf("Expected target 2, got %d", target)
 	}
@@ -78,12 +84,14 @@ func TestJumpManager(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to delete jump relation: %v", err)
 	}
+
 	if jm.GetJumpCount() != 0 {
 		t.Errorf("Expected 0 relations after deletion, got %d", jm.GetJumpCount())
 	}
 }
 
 func TestNextID(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	sm := NewServerManager(tempDir)
 	jm := NewJumpManager(tempDir)
@@ -91,20 +99,24 @@ func TestNextID(t *testing.T) {
 	var err error
 	// First server
 	server1 := Server{Host: "192.168.1.1", User: "user1", Name: "Server 1", Password: "password1"}
+
 	err = sm.Add(server1)
 	if err != nil {
 		t.Fatalf("Failed to add server1: %v", err)
 	}
+
 	if sm.Servers[0].ID != 1 {
 		t.Errorf("Expected ID 1, got %d", sm.Servers[0].ID)
 	}
 
 	// Second server
 	server2 := Server{Host: "192.168.1.2", User: "user2", Name: "Server 2", Password: "password2"}
+
 	err = sm.Add(server2)
 	if err != nil {
 		t.Fatalf("Failed to add server2: %v", err)
 	}
+
 	if sm.Servers[1].ID != 2 {
 		t.Errorf("Expected ID 2, got %d", sm.Servers[1].ID)
 	}
@@ -114,7 +126,9 @@ func TestNextID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to delete server1: %v", err)
 	}
+
 	server3 := Server{Host: "192.168.1.3", User: "user3", Name: "Server 3", Password: "password3"}
+
 	err = sm.Add(server3)
 	if err != nil {
 		t.Fatalf("Failed to add server3: %v", err)
@@ -126,12 +140,14 @@ func TestNextID(t *testing.T) {
 }
 
 func TestFileOperations(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	sm := NewServerManager(tempDir)
 
 	var err error
 	// Add server
 	server := Server{Host: "192.168.1.100", User: "admin", Name: "Test Server", Password: "testpassword123"}
+
 	err = sm.Add(server)
 	if err != nil {
 		t.Fatalf("Failed to add server: %v", err)
@@ -149,6 +165,7 @@ func TestFileOperations(t *testing.T) {
 }
 
 func TestJumpRelationUpdate(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	jm := NewJumpManager(tempDir)
 
@@ -158,6 +175,7 @@ func TestJumpRelationUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to add first relation: %v", err)
 	}
+
 	if jm.GetJumpCount() != 1 {
 		t.Errorf("Expected 1 relation, got %d", jm.GetJumpCount())
 	}
@@ -167,6 +185,7 @@ func TestJumpRelationUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to add second relation: %v", err)
 	}
+
 	if jm.GetJumpCount() != 2 {
 		t.Errorf("Expected 2 relations after adding second relation, got %d", jm.GetJumpCount())
 	}
@@ -176,27 +195,32 @@ func TestJumpRelationUpdate(t *testing.T) {
 	if len(targets) != 2 {
 		t.Errorf("Expected 2 targets for server 1, got %d", len(targets))
 	}
-	
+
 	// Check that both targets are present
 	hasTarget2 := false
 	hasTarget3 := false
+
 	for _, target := range targets {
 		if target == 2 {
 			hasTarget2 = true
 		}
+
 		if target == 3 {
 			hasTarget3 = true
 		}
 	}
+
 	if !hasTarget2 {
 		t.Error("Target 2 should exist")
 	}
+
 	if !hasTarget3 {
 		t.Error("Target 3 should exist")
 	}
 }
 
 func TestSortServers(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	sm := NewServerManager(tempDir)
 	jm := NewJumpManager(tempDir)
@@ -255,6 +279,7 @@ func TestSortServers(t *testing.T) {
 	if !exists {
 		t.Error("Jump target should exist after sort")
 	}
+
 	if target != 3 {
 		t.Errorf("Expected jump target 3, got %d", target)
 	}
@@ -264,8 +289,9 @@ func TestSortServers(t *testing.T) {
 func BenchmarkServerManagerAdd(b *testing.B) {
 	tempDir := b.TempDir()
 	sm := NewServerManager(tempDir)
-	
+
 	b.ResetTimer()
+
 	for i := 0; i < b.N; i++ {
 		server := Server{
 			Host:     "192.168.1.100",
@@ -273,6 +299,7 @@ func BenchmarkServerManagerAdd(b *testing.B) {
 			Name:     "Test Server",
 			Password: "testpassword123",
 		}
+
 		err := sm.Add(server)
 		if err != nil {
 			b.Fatalf("Failed to add server: %v", err)
@@ -283,8 +310,9 @@ func BenchmarkServerManagerAdd(b *testing.B) {
 func BenchmarkJumpManagerAdd(b *testing.B) {
 	tempDir := b.TempDir()
 	jm := NewJumpManager(tempDir)
-	
+
 	b.ResetTimer()
+
 	for i := 0; i < b.N; i++ {
 		err := jm.Add(i, i+1)
 		if err != nil {
@@ -295,13 +323,15 @@ func BenchmarkJumpManagerAdd(b *testing.B) {
 
 func BenchmarkEncryption(b *testing.B) {
 	password := "test-password-123"
-	
+
 	b.ResetTimer()
+
 	for i := 0; i < b.N; i++ {
 		encrypted, err := EncryptPassword(password)
 		if err != nil {
 			b.Fatal(err)
 		}
+
 		_, err = DecryptPassword(encrypted)
 		if err != nil {
 			b.Fatal(err)
@@ -313,7 +343,7 @@ func BenchmarkMemory(b *testing.B) {
 	tempDir := b.TempDir()
 	sm := NewServerManager(tempDir)
 	jm := NewJumpManager(tempDir)
-	
+
 	// Pre-allocate servers
 	servers := make([]Server, 100)
 	for i := range servers {
@@ -324,8 +354,9 @@ func BenchmarkMemory(b *testing.B) {
 			Password: "testpassword123",
 		}
 	}
-	
+
 	b.ResetTimer()
+
 	for i := 0; i < b.N; i++ {
 		// Add servers
 		for _, server := range servers {
@@ -334,7 +365,7 @@ func BenchmarkMemory(b *testing.B) {
 				b.Fatalf("Failed to add server: %v", err)
 			}
 		}
-		
+
 		// Add jump relations
 		for j := 0; j < len(servers)-1; j++ {
 			err := jm.Add(j+1, j+2)
@@ -342,10 +373,10 @@ func BenchmarkMemory(b *testing.B) {
 				b.Fatalf("Failed to add jump relation: %v", err)
 			}
 		}
-		
+
 		// Clear for next iteration
 		sm.Servers = sm.Servers[:0]
 		jm.Graph.AdjacencyList = make(map[int][]int)
 		jm.Graph.ReverseList = make(map[int][]int)
 	}
-} 
+}
