@@ -546,7 +546,9 @@ func (sm *ServerManager) Add(s Server) error {
 	
 	s.ID = sm.nextID()
 	sm.Servers = append(sm.Servers, s)
-	sm.Save()
+	if err := sm.Save(); err != nil {
+		return fmt.Errorf("failed to save after add: %w", err)
+	}
 	return nil
 }
 
@@ -568,7 +570,9 @@ func (sm *ServerManager) AddWithID(s Server, id int) error {
 	
 	s.ID = id
 	sm.Servers = append(sm.Servers, s)
-	sm.Save()
+	if err := sm.Save(); err != nil {
+		return fmt.Errorf("failed to save after addWithID: %w", err)
+	}
 	return nil
 }
 
@@ -627,14 +631,16 @@ func (sm *ServerManager) UpdateServerID(oldID, newID int, jm *JumpManager) error
 		
 		// Update the graph
 		jm.Graph = newGraph
-		jm.Save()
+		if err := jm.Save(); err != nil {
+			return fmt.Errorf("failed to save after UpdateServerID: %w", err)
+		}
 		
 		fmt.Printf("🔄 Updated jump relations: server ID %d → %d\n", oldServerID, newID)
 	}
 	
 	// Save server changes
 	if err := sm.Save(); err != nil {
-		return fmt.Errorf("failed to save server data: %w", err)
+		return fmt.Errorf("failed to save after UpdateServerID: %w", err)
 	}
 	return nil
 }
@@ -1040,7 +1046,10 @@ func (jm *JumpManager) Add(fromID, toID int) error {
 		return err
 	}
 	
-	return jm.Save()
+	if err := jm.Save(); err != nil {
+		return fmt.Errorf("failed to save after AddJump: %w", err)
+	}
+	return nil
 }
 
 func (jm *JumpManager) Delete(fromID int) error {
@@ -1057,7 +1066,10 @@ func (jm *JumpManager) Delete(fromID int) error {
 		}
 	}
 	
-	return jm.Save()
+	if err := jm.Save(); err != nil {
+		return fmt.Errorf("failed to save after DeleteJump: %w", err)
+	}
+	return nil
 }
 
 // DeleteAllRelationsForServer removes all jump relations involving the given server
