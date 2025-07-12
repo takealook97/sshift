@@ -30,6 +30,7 @@ jobs:
             ${{ runner.os }}-go-
         continue-on-error: true
         timeout-minutes: 5
+        if: hashFiles('**/go.sum') != ''
 
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v3

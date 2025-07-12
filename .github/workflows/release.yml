@@ -45,6 +45,7 @@ jobs:
             ${{ runner.os }}-go-
         continue-on-error: true
         timeout-minutes: 5
+        if: hashFiles('**/go.sum') != ''
 
       - name: Run security scan
         uses: aquasecurity/trivy-action@master

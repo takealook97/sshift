@@ -2610,7 +2610,10 @@ func ExportData(sm *ServerManager, jm *JumpManager) {
 	
 	// Create .ssh directory if it doesn't exist
 	if _, err := os.Stat(sshDir); os.IsNotExist(err) {
-		os.MkdirAll(sshDir, 0700)
+		if err := os.MkdirAll(sshDir, 0700); err != nil {
+			fmt.Printf("Error creating .ssh directory: %v\n", err)
+			return
+		}
 	}
 	
 	// Create export data structure
@@ -2805,7 +2808,10 @@ func ImportData(sm *ServerManager, jm *JumpManager) {
 		// Convert old format to new graph format
 		jm.Graph = NewJumpGraph()
 		for _, relation := range importData.JumpRelations {
-			jm.Graph.AddJump(relation.FromID, relation.ToID)
+			if err := jm.Graph.AddJump(relation.FromID, relation.ToID); err != nil {
+				fmt.Printf("Error adding jump relation %d -> %d: %v\n", relation.FromID, relation.ToID, err)
+				continue
+			}
 		}
 	}
 	
@@ -2979,7 +2985,9 @@ func setupEncryptionKey() {
 	
 	// Mark setup as complete
 	setupFile := filepath.Join(baseDir, ".setup_complete")
-	os.WriteFile(setupFile, []byte("Setup completed on "+time.Now().Format("2006-01-02 15:04:05")), 0600)
+	if err := os.WriteFile(setupFile, []byte("Setup completed on "+time.Now().Format("2006-01-02 15:04:05")), 0600); err != nil {
+		fmt.Printf("Error writing setup file: %v\n", err)
+	}
 	
 	fmt.Println()
 	if isReSetup {

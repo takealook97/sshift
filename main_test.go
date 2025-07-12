@@ -12,11 +12,14 @@ func TestServerManager(t *testing.T) {
 
 	// Test server addition
 	server := Server{
-		Host: "192.168.1.100",
-		User: "admin",
-		Name: "Test Server",
+		Host:     "192.168.1.100",
+		User:     "admin",
+		Name:     "Test Server",
+		Password: "testpassword123",
 	}
-	sm.Add(server)
+	if err := sm.Add(server); err != nil {
+		t.Errorf("Failed to add server: %v", err)
+	}
 
 	if len(sm.Servers) != 1 {
 		t.Errorf("Expected 1 server, got %d", len(sm.Servers))
@@ -51,7 +54,9 @@ func TestJumpManager(t *testing.T) {
 	jm := NewJumpManager(tempDir)
 
 	// Test jump relation addition
-	jm.Add(1, 2)
+	if err := jm.Add(1, 2); err != nil {
+		t.Errorf("Failed to add jump relation: %v", err)
+	}
 
 	if jm.GetJumpCount() != 1 {
 		t.Errorf("Expected 1 relation, got %d", jm.GetJumpCount())
@@ -79,14 +84,14 @@ func TestNextID(t *testing.T) {
 	jm := NewJumpManager(tempDir)
 
 	// First server
-	server1 := Server{Host: "192.168.1.1", User: "user1", Name: "Server 1"}
+	server1 := Server{Host: "192.168.1.1", User: "user1", Name: "Server 1", Password: "password1"}
 	sm.Add(server1)
 	if sm.Servers[0].ID != 1 {
 		t.Errorf("Expected ID 1, got %d", sm.Servers[0].ID)
 	}
 
 	// Second server
-	server2 := Server{Host: "192.168.1.2", User: "user2", Name: "Server 2"}
+	server2 := Server{Host: "192.168.1.2", User: "user2", Name: "Server 2", Password: "password2"}
 	sm.Add(server2)
 	if sm.Servers[1].ID != 2 {
 		t.Errorf("Expected ID 2, got %d", sm.Servers[1].ID)
@@ -94,10 +99,11 @@ func TestNextID(t *testing.T) {
 
 	// Delete first server and add new server
 	sm.DeleteByID(1, jm)
-	server3 := Server{Host: "192.168.1.3", User: "user3", Name: "Server 3"}
+	server3 := Server{Host: "192.168.1.3", User: "user3", Name: "Server 3", Password: "password3"}
 	sm.Add(server3)
-	if sm.Servers[1].ID != 3 {
-		t.Errorf("Expected ID 3, got %d", sm.Servers[1].ID)
+	// After deletion and re-addition, the new server should get the next available ID (1, since it was freed)
+	if sm.Servers[1].ID != 1 {
+		t.Errorf("Expected ID 1 (reused from deleted server), got %d", sm.Servers[1].ID)
 	}
 }
 
@@ -106,7 +112,7 @@ func TestFileOperations(t *testing.T) {
 	sm := NewServerManager(tempDir)
 
 	// Add server
-	server := Server{Host: "192.168.1.100", User: "admin", Name: "Test Server"}
+	server := Server{Host: "192.168.1.100", User: "admin", Name: "Test Server", Password: "testpassword123"}
 	sm.Add(server)
 
 	// Load with new instance
@@ -125,23 +131,45 @@ func TestJumpRelationUpdate(t *testing.T) {
 	jm := NewJumpManager(tempDir)
 
 	// Add first relation
-	jm.Add(1, 2)
+	err := jm.Add(1, 2)
+	if err != nil {
+		t.Errorf("Failed to add first relation: %v", err)
+	}
 	if jm.GetJumpCount() != 1 {
 		t.Errorf("Expected 1 relation, got %d", jm.GetJumpCount())
 	}
 
-	// Add different toID with same fromID (update)
-	jm.Add(1, 3)
-	if jm.GetJumpCount() != 1 {
-		t.Errorf("Expected 1 relation after update, got %d", jm.GetJumpCount())
+	// Add different toID with same fromID (this should create a new relation, not update)
+	err = jm.Add(1, 3)
+	if err != nil {
+		t.Errorf("Failed to add second relation: %v", err)
+	}
+	if jm.GetJumpCount() != 2 {
+		t.Errorf("Expected 2 relations after adding second relation, got %d", jm.GetJumpCount())
 	}
 
-	target, exists := jm.GetJumpTarget(1)
-	if !exists {
-		t.Error("Jump target should exist")
+	// Check that both relations exist
+	targets := jm.GetJumpTargets(1)
+	if len(targets) != 2 {
+		t.Errorf("Expected 2 targets for server 1, got %d", len(targets))
 	}
-	if target != 3 {
-		t.Errorf("Expected target 3 after update, got %d", target)
+	
+	// Check that both targets are present
+	hasTarget2 := false
+	hasTarget3 := false
+	for _, target := range targets {
+		if target == 2 {
+			hasTarget2 = true
+		}
+		if target == 3 {
+			hasTarget3 = true
+		}
+	}
+	if !hasTarget2 {
+		t.Error("Target 2 should exist")
+	}
+	if !hasTarget3 {
+		t.Error("Target 3 should exist")
 	}
 }
 
@@ -152,10 +180,10 @@ func TestSortServers(t *testing.T) {
 
 	// Add servers (ID 1, 2, 3, 4)
 	servers := []Server{
-		{Host: "192.168.1.1", User: "user1", Name: "Server 1"},
-		{Host: "192.168.1.2", User: "user2", Name: "Server 2"},
-		{Host: "192.168.1.3", User: "user3", Name: "Server 3"},
-		{Host: "192.168.1.4", User: "user4", Name: "Server 4"},
+		{Host: "192.168.1.1", User: "user1", Name: "Server 1", Password: "password1"},
+		{Host: "192.168.1.2", User: "user2", Name: "Server 2", Password: "password2"},
+		{Host: "192.168.1.3", User: "user3", Name: "Server 3", Password: "password3"},
+		{Host: "192.168.1.4", User: "user4", Name: "Server 4", Password: "password4"},
 	}
 
 	for _, server := range servers {
@@ -207,9 +235,10 @@ func BenchmarkServerManagerAdd(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		server := Server{
-			Host: "192.168.1.100",
-			User: "admin",
-			Name: "Test Server",
+			Host:     "192.168.1.100",
+			User:     "admin",
+			Name:     "Test Server",
+			Password: "testpassword123",
 		}
 		sm.Add(server)
 	}
@@ -250,9 +279,10 @@ func BenchmarkMemory(b *testing.B) {
 	servers := make([]Server, 100)
 	for i := range servers {
 		servers[i] = Server{
-			Host: "192.168.1.100",
-			User: "admin",
-			Name: "Test Server",
+			Host:     "192.168.1.100",
+			User:     "admin",
+			Name:     "Test Server",
+			Password: "testpassword123",
 		}
 	}
 	
