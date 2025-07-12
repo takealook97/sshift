@@ -22,7 +22,7 @@ linters:
     - dupl
     - goconst
     - gocognit
-    - gomnd
+    - mnd
     - lll
     - nakedret
     - noctx
@@ -42,7 +42,7 @@ linters-settings:
   goconst:
     min-len: 3
     min-occurrences: 3
-  gomnd:
+  mnd:
     checks: argument,case,condition,operation,return,assign
   lll:
     line-length: 120
@@ -111,7 +111,7 @@ issues:
   exclude-rules:
     - path: _test\.go
       linters:
-        - gomnd
+        - mnd
         - gocyclo
         - dupl
         - goconst

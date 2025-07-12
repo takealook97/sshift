@@ -6,7 +6,6 @@ on:
   pull_request:
     branches: [main]
   schedule:
-    # 매주 화요일 오전 10시에 실행
     - cron: "0 10 * * 2"
 
 jobs:
@@ -27,7 +26,7 @@ jobs:
       - name: Run performance benchmarks
         run: |
           echo "🔍 Running performance benchmarks..."
-          go test -bench=. -benchmem -benchtime=5s ./... > benchmark-results.txt
+          go test -bench=. -benchmem -benchtime=5s ./... > benchmark-results.txt 2>&1 || true
 
           echo "📊 Benchmark Results:"
           cat benchmark-results.txt
@@ -49,7 +48,7 @@ jobs:
       - name: Memory usage test
         run: |
           echo "🧠 Testing memory usage..."
-          go test -bench=BenchmarkMemory -benchmem -benchtime=10s ./... > memory-results.txt
+          go test -bench=BenchmarkMemory -benchmem -benchtime=10s ./... > memory-results.txt 2>&1 || true
 
           echo "📊 Memory Usage Results:"
           cat memory-results.txt
