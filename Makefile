@@ -1,16 +1,16 @@
 # SSHift Makefile
 
-# 변수 정의
+# Variable definitions
 BINARY_NAME=sshift
 BUILD_DIR=build
 VERSION=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS=-ldflags "-X main.Version=$(VERSION)"
 
-# 기본 타겟
+# Default target
 .PHONY: all
 all: clean build
 
-# 빌드
+# Build
 .PHONY: build
 build:
 	@echo "Building $(BINARY_NAME)..."
@@ -18,7 +18,7 @@ build:
 	go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) main.go
 	@echo "Build complete: $(BUILD_DIR)/$(BINARY_NAME)"
 
-# 릴리즈 빌드 (최적화)
+# Release build (optimized)
 .PHONY: release
 release:
 	@echo "Building release version..."
@@ -29,14 +29,14 @@ release:
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -a -installsuffix cgo -o $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe main.go
 	@echo "Release builds complete"
 
-# 설치
+# Install
 .PHONY: install
 install: build
 	@echo "Installing $(BINARY_NAME)..."
 	sudo cp $(BUILD_DIR)/$(BINARY_NAME) /usr/local/bin/
 	@echo "Installation complete"
 
-# 의존성 설치
+# Install dependencies
 .PHONY: deps
 deps:
 	@echo "Installing dependencies..."
@@ -44,14 +44,14 @@ deps:
 	go mod download
 	@echo "Dependencies installed"
 
-# 테스트
+# Test
 .PHONY: test
 test:
 	@echo "Running tests..."
 	go test -v ./...
 	@echo "Tests complete"
 
-# 테스트 커버리지
+# Test coverage
 .PHONY: test-coverage
 test-coverage:
 	@echo "Running tests with coverage..."
@@ -59,21 +59,31 @@ test-coverage:
 	go tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report generated: coverage.html"
 
-# 린트
+# Coverage report (no threshold)
+.PHONY: test-coverage-report
+test-coverage-report:
+	@echo "Running tests with coverage report..."
+	@go test -v -coverprofile=coverage.out -covermode=atomic ./...
+	@COVERAGE=$$(go tool cover -func=coverage.out | grep total: | awk '{print $$3}' | sed 's/%//'); \
+	echo "Total coverage: $$COVERAGE%"; \
+	go tool cover -html=coverage.out -o coverage.html; \
+	echo "Coverage report generated: coverage.html"
+
+# Lint
 .PHONY: lint
 lint:
 	@echo "Running linter..."
 	golangci-lint run
 	@echo "Linting complete"
 
-# 포맷팅
+# Format
 .PHONY: fmt
 fmt:
 	@echo "Formatting code..."
 	go fmt ./...
 	@echo "Formatting complete"
 
-# 정리
+# Clean
 .PHONY: clean
 clean:
 	@echo "Cleaning build artifacts..."
@@ -81,13 +91,13 @@ clean:
 	rm -f coverage.out coverage.html
 	@echo "Clean complete"
 
-# 개발 모드 실행
+# Development mode run
 .PHONY: dev
 dev: build
 	@echo "Running in development mode..."
 	./$(BUILD_DIR)/$(BINARY_NAME)
 
-# 테스트 모드 실행
+# Test mode run
 .PHONY: test-run
 test-run: build
 	@echo "Running in test mode..."
@@ -146,7 +156,7 @@ homebrew-sha256:
 	sed -i '' "s/sha256 \"[^\"]*\"/sha256 \"$$SHA256\"/" Formula/sshift.rb
 	@echo "SHA256 updated in Formula/sshift.rb"
 
-# 도움말
+# Help
 .PHONY: help
 help:
 	@echo "Available targets:"
@@ -156,6 +166,7 @@ help:
 	@echo "  deps         - Install dependencies"
 	@echo "  test         - Run tests"
 	@echo "  test-coverage - Run tests with coverage report"
+	@echo "  test-coverage-report - Run tests with coverage report (no threshold)"
 	@echo "  lint         - Run linter"
 	@echo "  fmt          - Format code"
 	@echo "  clean        - Clean build artifacts"
