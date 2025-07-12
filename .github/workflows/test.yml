@@ -46,22 +46,29 @@ jobs:
 
       - name: Check test coverage threshold
         run: |
-          COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
-          echo "Test coverage: ${COVERAGE}%"
-          if (( $(echo "$COVERAGE < 70" | bc -l) )); then
-            echo "❌ Test coverage is below 70% (current: ${COVERAGE}%)"
-            exit 1
+          if [ -f coverage.out ]; then
+            COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
+            echo "Test coverage: ${COVERAGE}%"
+            if (( $(echo "$COVERAGE < 70" | bc -l) )); then
+              echo "❌ Test coverage is below 70% (current: ${COVERAGE}%)"
+              exit 1
+            else
+              echo "✅ Test coverage is above 70% (current: ${COVERAGE}%)"
+            fi
           else
-            echo "✅ Test coverage is above 70% (current: ${COVERAGE}%)"
+            echo "❌ Coverage file not found"
+            exit 1
           fi
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3
+        if: hashFiles('coverage.out') != ''
         with:
           file: ./coverage.out
           flags: unittests
           name: codecov-umbrella
           fail_ci_if_error: true
+        continue-on-error: true
 
       - name: Run race detector
         run: go test -race -v ./...
@@ -73,4 +80,6 @@ jobs:
           if [ -f mem.prof ]; then
             echo "📊 Memory profile generated"
             go tool pprof -list=. mem.prof | head -20
+          else
+            echo "No memory profile generated"
           fi

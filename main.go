@@ -61,6 +61,8 @@ const (
 	MaxHostLength = 255
 	MaxUserLength = 64
 	MaxNameLength = 100
+	YesResponse = "y"
+	YesResponseFull = "yes"
 )
 
 // SecureString provides secure string handling with automatic memory clearing
@@ -473,15 +475,7 @@ func getAuthType(server Server) string {
 	}
 }
 
-// secureZeroBytes zeros out a byte slice to prevent memory leaks
-func secureZeroBytes(b []byte) {
-	if b == nil {
-		return
-	}
-	for i := range b {
-		b[i] = 0
-	}
-}
+
 
 // GetDecryptedPassword returns the decrypted password and clears it from memory after use
 func (s *Server) GetDecryptedPassword() (string, error) {
@@ -515,7 +509,10 @@ func (sm *ServerManager) Load() {
 		sm.Servers = []Server{}
 		return
 	}
-	json.Unmarshal(file, &sm.Servers)
+	if err := json.Unmarshal(file, &sm.Servers); err != nil {
+		fmt.Printf("Failed to unmarshal server data: %v\n", err)
+		sm.Servers = []Server{}
+	}
 }
 
 func (sm *ServerManager) Save() error {
@@ -1016,7 +1013,10 @@ func (jm *JumpManager) Load() {
 	// Convert old format to new graph format
 	jm.Graph = NewJumpGraph()
 	for _, relation := range oldRelations {
-		jm.Graph.AddJump(relation.FromID, relation.ToID)
+		if err := jm.Graph.AddJump(relation.FromID, relation.ToID); err != nil {
+			fmt.Printf("Error adding jump relation %d -> %d: %v\n", relation.FromID, relation.ToID, err)
+			continue
+		}
 	}
 }
 
@@ -1148,7 +1148,7 @@ func PromptInput(prompt string) string {
 
 // validatePasswordBasic validates basic password requirements for server storage
 func validatePasswordBasic(password string) error {
-	if len(password) == 0 {
+	if password == "" {
 		return fmt.Errorf("password cannot be empty")
 	}
 	if len(password) > MaxPasswordLength {
@@ -1180,7 +1180,7 @@ func PromptInputSecure(prompt string) (string, error) {
 	}
 	
 	// Basic validation
-	if len(password) == 0 {
+	if password == "" {
 		return "", fmt.Errorf("password cannot be empty")
 	}
 	
@@ -1240,7 +1240,7 @@ func PromptAddServer(sm *ServerManager) {
 	var password string
 	var keyPath string
 	
-	if usePassword == "y" || usePassword == "Y" {
+	if strings.EqualFold(usePassword, YesResponse) || strings.EqualFold(usePassword, YesResponseFull) {
 		password, err = PromptInputSecure("Enter password: ")
 		if err != nil {
 			fmt.Printf("❌ Error reading password: %v\n", err)
@@ -1262,13 +1262,13 @@ func PromptAddServer(sm *ServerManager) {
 		fmt.Println("✅ Passwords match!")
 		
 		// Password is already validated in PromptInputSecure
-			} else {
-			fmt.Println("Using SSH key authentication.")
-			keyPath = promptForSSHKey()
-			if keyPath == "" {
-				return
-			}
+	} else {
+		fmt.Println("Using SSH key authentication.")
+		keyPath = promptForSSHKey()
+		if keyPath == "" {
+			return
 		}
+	}
 
 	// Encrypt password if provided
 	encryptedPassword := ""
@@ -1907,27 +1907,7 @@ func connectWithPasswordSSH(server Server) {
 	}
 }
 
-// connectWithPasswordJump connects through jump server using password authentication
-func connectWithPasswordJump(fromServer, toServer Server, password string) {
-	// For now, use a simple approach with ssh command and expect-like behavior
-	// In production, you might want to use Go's crypto/ssh package
-	
-	fmt.Println("🔐 Using password authentication through jump server")
-	fmt.Println("   Note: This will prompt for password interactively")
-	
-	// Use ssh with ProxyJump and let it prompt for password
-	proxyJump := fmt.Sprintf("%s@%s", fromServer.User, fromServer.Host)
-	args := []string{"-J", proxyJump, "-o", "StrictHostKeyChecking=no"}
-	args = append(args, fmt.Sprintf("%s@%s", toServer.User, toServer.Host))
-	
-	cmd := exec.Command("ssh", args...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		fmt.Printf("Error running command: %v\n", err)
-	}
-}
+
 
 // createSSHClient creates an SSH client with password or key authentication
 func createSSHClient(host, user, password, keyPath string) (*ssh.Client, error) {
@@ -2001,7 +1981,7 @@ func createSSHClient(host, user, password, keyPath string) (*ssh.Client, error) 
 	
 	// Validate host format
 	if !strings.Contains(host, ":") {
-		host = host + ":22"
+		host += ":22"
 	}
 	
 	return ssh.Dial("tcp", host, config)
@@ -2520,10 +2500,10 @@ func PromptEditServer(sm *ServerManager, jm *JumpManager) {
 	changeAuth := PromptInput("Change authentication method? (y/n): ")
 	var newPassword, newKeyPath string
 
-	if strings.ToLower(changeAuth) == "y" || strings.ToLower(changeAuth) == "yes" {
+	if strings.EqualFold(changeAuth, YesResponse) || strings.EqualFold(changeAuth, YesResponseFull) {
 		usePassword := PromptInput("Use password? (y/n): ")
 		
-		if usePassword == "y" || usePassword == "Y" {
+		if strings.EqualFold(usePassword, YesResponse) || strings.EqualFold(usePassword, YesResponseFull) {
 			fmt.Print("Enter new password: ")
 			bytePassword, err := term.ReadPassword(syscall.Stdin)
 			if err != nil {
@@ -2804,7 +2784,7 @@ func ImportData(sm *ServerManager, jm *JumpManager) {
 	
 	// Confirm import
 	confirm := PromptInput(prompt("\nImport will replace all current data. Continue? (y/n): "))
-	if strings.ToLower(confirm) != "y" && strings.ToLower(confirm) != "yes" {
+	if !strings.EqualFold(confirm, YesResponse) && !strings.EqualFold(confirm, YesResponseFull) {
 		fmt.Println(errorMsg("Import cancelled"))
 		return
 	}

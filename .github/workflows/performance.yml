@@ -40,10 +40,14 @@ jobs:
           go test -bench=. -benchmem -benchtime=5s ./... > benchmark-results.txt 2>&1 || true
 
           echo "📊 Benchmark Results:"
-          cat benchmark-results.txt
+          if [ -f benchmark-results.txt ]; then
+            cat benchmark-results.txt
+          else
+            echo "No benchmark results generated"
+          fi
 
           # 성능 임계값 검사 (예시)
-          if grep -q "Benchmark.*[0-9]\{4,\}ns/op" benchmark-results.txt; then
+          if [ -f benchmark-results.txt ] && grep -q "Benchmark.*[0-9]\{4,\}ns/op" benchmark-results.txt; then
             echo "⚠️ Warning: Some operations are taking longer than expected"
           else
             echo "✅ Performance benchmarks passed"
@@ -51,10 +55,12 @@ jobs:
 
       - name: Upload benchmark results
         uses: actions/upload-artifact@v4
+        if: hashFiles('benchmark-results.txt') != ''
         with:
           name: benchmark-results
           path: benchmark-results.txt
           retention-days: 30
+        continue-on-error: true
 
       - name: Memory usage test
         run: |
@@ -62,11 +68,17 @@ jobs:
           go test -bench=BenchmarkMemory -benchmem -benchtime=10s ./... > memory-results.txt 2>&1 || true
 
           echo "📊 Memory Usage Results:"
-          cat memory-results.txt
+          if [ -f memory-results.txt ]; then
+            cat memory-results.txt
+          else
+            echo "No memory results generated"
+          fi
 
       - name: Upload memory results
         uses: actions/upload-artifact@v4
+        if: hashFiles('memory-results.txt') != ''
         with:
           name: memory-results
           path: memory-results.txt
           retention-days: 30
+        continue-on-error: true
