@@ -88,6 +88,7 @@ func TestNextID(t *testing.T) {
 	sm := NewServerManager(tempDir)
 	jm := NewJumpManager(tempDir)
 
+	var err error
 	// First server
 	server1 := Server{Host: "192.168.1.1", User: "user1", Name: "Server 1", Password: "password1"}
 	err = sm.Add(server1)
@@ -128,6 +129,7 @@ func TestFileOperations(t *testing.T) {
 	tempDir := t.TempDir()
 	sm := NewServerManager(tempDir)
 
+	var err error
 	// Add server
 	server := Server{Host: "192.168.1.100", User: "admin", Name: "Test Server", Password: "testpassword123"}
 	err = sm.Add(server)
@@ -150,6 +152,7 @@ func TestJumpRelationUpdate(t *testing.T) {
 	tempDir := t.TempDir()
 	jm := NewJumpManager(tempDir)
 
+	var err error
 	// Add first relation
 	err = jm.Add(1, 2)
 	if err != nil {
@@ -198,6 +201,7 @@ func TestSortServers(t *testing.T) {
 	sm := NewServerManager(tempDir)
 	jm := NewJumpManager(tempDir)
 
+	var err error
 	// Add servers (ID 1, 2, 3, 4)
 	servers := []Server{
 		{Host: "192.168.1.1", User: "user1", Name: "Server 1", Password: "password1"},
@@ -269,7 +273,7 @@ func BenchmarkServerManagerAdd(b *testing.B) {
 			Name:     "Test Server",
 			Password: "testpassword123",
 		}
-		err = sm.Add(server)
+		err := sm.Add(server)
 		if err != nil {
 			b.Fatalf("Failed to add server: %v", err)
 		}
@@ -282,7 +286,7 @@ func BenchmarkJumpManagerAdd(b *testing.B) {
 	
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		err = jm.Add(i, i+1)
+		err := jm.Add(i, i+1)
 		if err != nil {
 			b.Fatalf("Failed to add jump relation: %v", err)
 		}
@@ -325,7 +329,7 @@ func BenchmarkMemory(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		// Add servers
 		for _, server := range servers {
-			err = sm.Add(server)
+			err := sm.Add(server)
 			if err != nil {
 				b.Fatalf("Failed to add server: %v", err)
 			}
@@ -333,7 +337,7 @@ func BenchmarkMemory(b *testing.B) {
 		
 		// Add jump relations
 		for j := 0; j < len(servers)-1; j++ {
-			err = jm.Add(j+1, j+2)
+			err := jm.Add(j+1, j+2)
 			if err != nil {
 				b.Fatalf("Failed to add jump relation: %v", err)
 			}
