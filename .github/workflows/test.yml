@@ -28,6 +28,7 @@ jobs:
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
           restore-keys: |
             ${{ runner.os }}-go-
+        continue-on-error: true
 
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v3

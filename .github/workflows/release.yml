@@ -43,6 +43,7 @@ jobs:
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
           restore-keys: |
             ${{ runner.os }}-go-
+        continue-on-error: true
 
       - name: Run security scan
         uses: aquasecurity/trivy-action@master

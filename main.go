@@ -1052,7 +1052,9 @@ func (jm *JumpManager) Delete(fromID int) error {
 	
 	// Delete all outgoing jumps
 	for _, target := range targets {
-		jm.Graph.DeleteJump(fromID, target)
+		if err := jm.Graph.DeleteJump(fromID, target); err != nil {
+			return fmt.Errorf("failed to delete jump %d -> %d: %w", fromID, target, err)
+		}
 	}
 	
 	return jm.Save()
@@ -1061,7 +1063,9 @@ func (jm *JumpManager) Delete(fromID int) error {
 // DeleteAllRelationsForServer removes all jump relations involving the given server
 func (jm *JumpManager) DeleteAllRelationsForServer(serverID int) int {
 	deletedCount := jm.Graph.DeleteAllJumpsForServer(serverID)
-	jm.Save()
+	if err := jm.Save(); err != nil {
+		fmt.Printf("Error saving jump data: %v\n", err)
+	}
 	return deletedCount
 }
 
@@ -1677,33 +1681,7 @@ func Connect(server Server) {
 	
 	// Run command - if SSH exits normally, exit the program
 	err = cmd.Run()
-	if err != nil {
-		// Only show error message if it's not a normal exit
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			code := exitErr.ExitCode()
-			// Treat common exit codes as normal termination
-			// 0: normal exit, 127: logout/exit, 130: Ctrl+C, 143: SIGTERM
-			if code == 0 || code == 127 || code == 130 || code == 143 {
-				// SSH exited normally, exit the program
-				os.Exit(0)
-			} else {
-				fmt.Printf("❌ SSH connection failed (exit code %d): %v\n", code, err)
-				// Show stderr output if available
-				if exitErr.Stderr != nil && len(exitErr.Stderr) > 0 {
-					fmt.Printf("   Error details: %s\n", string(exitErr.Stderr))
-				}
-				fmt.Println("Press Enter to return to menu...")
-				bufio.NewScanner(os.Stdin).Scan()
-			}
-		} else {
-			fmt.Printf("❌ SSH connection failed: %v\n", err)
-			fmt.Println("Press Enter to return to menu...")
-			bufio.NewScanner(os.Stdin).Scan()
-		}
-	} else {
-		// SSH exited normally (no error), exit the program
-		os.Exit(0)
-	}
+	handleSSHError(err, "SSH connection")
 }
 
 func ConnectWithJump(fromServer, toServer Server) {
@@ -1783,33 +1761,7 @@ func ConnectWithJump(fromServer, toServer Server) {
 		
 		// Run command - if SSH exits normally, exit the program
 		err = cmd.Run()
-		if err != nil {
-			// Only show error message if it's not a normal exit
-			if exitErr, ok := err.(*exec.ExitError); ok {
-				code := exitErr.ExitCode()
-				// Treat common exit codes as normal termination
-				// 0: normal exit, 127: logout/exit, 130: Ctrl+C, 143: SIGTERM
-				if code == 0 || code == 127 || code == 130 || code == 143 {
-					// SSH exited normally, exit the program
-					os.Exit(0)
-				} else {
-					fmt.Printf("❌ SSH jump connection failed (exit code %d): %v\n", code, err)
-					// Show stderr output if available
-					if exitErr.Stderr != nil && len(exitErr.Stderr) > 0 {
-						fmt.Printf("   Error details: %s\n", string(exitErr.Stderr))
-					}
-					fmt.Println("Press Enter to return to menu...")
-					bufio.NewScanner(os.Stdin).Scan()
-				}
-			} else {
-				fmt.Printf("❌ SSH jump connection failed: %v\n", err)
-				fmt.Println("Press Enter to return to menu...")
-				bufio.NewScanner(os.Stdin).Scan()
-			}
-		} else {
-			// SSH exited normally (no error), exit the program
-			os.Exit(0)
-		}
+		handleSSHError(err, "SSH jump connection")
 		return
 	}
 	
@@ -1862,33 +1814,7 @@ func ConnectWithJump(fromServer, toServer Server) {
 	
 	// Run command - if SSH exits normally, exit the program
 	err = cmd.Run()
-	if err != nil {
-		// Only show error message if it's not a normal exit
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			code := exitErr.ExitCode()
-			// Treat common exit codes as normal termination
-			// 0: normal exit, 127: logout/exit, 130: Ctrl+C, 143: SIGTERM
-			if code == 0 || code == 127 || code == 130 || code == 143 {
-				// SSH exited normally, exit the program
-				os.Exit(0)
-			} else {
-				fmt.Printf("❌ SSH jump connection failed (exit code %d): %v\n", code, err)
-				// Show stderr output if available
-				if exitErr.Stderr != nil && len(exitErr.Stderr) > 0 {
-					fmt.Printf("   Error details: %s\n", string(exitErr.Stderr))
-				}
-				fmt.Println("Press Enter to return to menu...")
-				bufio.NewScanner(os.Stdin).Scan()
-			}
-		} else {
-			fmt.Printf("❌ SSH jump connection failed: %v\n", err)
-			fmt.Println("Press Enter to return to menu...")
-			bufio.NewScanner(os.Stdin).Scan()
-		}
-	} else {
-		// SSH exited normally (no error), exit the program
-		os.Exit(0)
-	}
+	handleSSHError(err, "SSH jump connection")
 }
 
 // connectWithPasswordSSH connects using Go's SSH package with password authentication
@@ -3307,5 +3233,36 @@ func promptForSSHKey() string {
 			keyPath = filepath.Join(homeDir, keyPath[1:])
 		}
 		return keyPath
+	}
+}
+
+// handleSSHError handles SSH command execution errors with consistent error reporting
+func handleSSHError(err error, connectionType string) {
+	if err != nil {
+		// Only show error message if it's not a normal exit
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			code := exitErr.ExitCode()
+			// Treat common exit codes as normal termination
+			// 0: normal exit, 127: logout/exit, 130: Ctrl+C, 143: SIGTERM
+			if code == 0 || code == 127 || code == 130 || code == 143 {
+				// SSH exited normally, exit the program
+				os.Exit(0)
+			} else {
+				fmt.Printf("❌ %s failed (exit code %d): %v\n", connectionType, code, err)
+				// Show stderr output if available
+				if exitErr.Stderr != nil && len(exitErr.Stderr) > 0 {
+					fmt.Printf("   Error details: %s\n", string(exitErr.Stderr))
+				}
+				fmt.Println("Press Enter to return to menu...")
+				bufio.NewScanner(os.Stdin).Scan()
+			}
+		} else {
+			fmt.Printf("❌ %s failed: %v\n", connectionType, err)
+			fmt.Println("Press Enter to return to menu...")
+			bufio.NewScanner(os.Stdin).Scan()
+		}
+	} else {
+		// SSH exited normally (no error), exit the program
+		os.Exit(0)
 	}
 }
