@@ -45,7 +45,7 @@ jobs:
 
       - name: Upload Gosec scan results to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v3
-        if: always() && hash gosec-results.sarif 2>/dev/null
+        if: always() && hashFiles('gosec-results.sarif') != ''
         with:
           sarif_file: "gosec-results.sarif"
 

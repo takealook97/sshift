@@ -633,7 +633,9 @@ func (sm *ServerManager) UpdateServerID(oldID, newID int, jm *JumpManager) error
 	}
 	
 	// Save server changes
-	sm.Save()
+	if err := sm.Save(); err != nil {
+		return fmt.Errorf("failed to save server data: %w", err)
+	}
 	return nil
 }
 
@@ -1244,51 +1246,13 @@ func PromptAddServer(sm *ServerManager) {
 		fmt.Println("✅ Passwords match!")
 		
 		// Password is already validated in PromptInputSecure
-	} else {
-		fmt.Println("Using SSH key authentication.")
-		
-		// Find available SSH keys
-		homeDir, _ := os.UserHomeDir()
-		sshDir := filepath.Join(homeDir, ".ssh")
-		availableKeys, err := findSSHKeys(sshDir)
-		if err != nil {
-			fmt.Printf("❌ Error finding SSH keys: %v\n", err)
-			return
-		}
-		
-		if len(availableKeys) > 0 {
-			fmt.Println("\nAvailable SSH keys:")
-			for i, key := range availableKeys {
-				fmt.Printf("  %d) %s\n", i+1, key)
-			}
-			fmt.Printf("  %d) Enter custom path\n", len(availableKeys)+1)
-			
-			choice := PromptInput(fmt.Sprintf("\nSelect SSH key (1-%d): ", len(availableKeys)+1))
-			choiceNum, err := strconv.Atoi(choice)
-			if err != nil || choiceNum < 1 || choiceNum > len(availableKeys)+1 {
-				fmt.Println("❌ Invalid selection. Please try again.")
-				return
-			} else if choiceNum <= len(availableKeys) {
-				// User selected a specific key
-				keyPath = availableKeys[choiceNum-1]
-				fmt.Printf("✅ Selected: %s\n", keyPath)
 			} else {
-				// User wants to enter custom path
-				keyPath = PromptInput("Enter SSH key path (e.g., ~/.ssh/my_key): ")
-				// Expand ~ to home directory
-				if strings.HasPrefix(keyPath, "~") {
-					keyPath = filepath.Join(homeDir, keyPath[1:])
-				}
-			}
-		} else {
-			fmt.Println("No SSH keys found in ~/.ssh/")
-			keyPath = PromptInput("Enter SSH key path (e.g., ~/.ssh/my_key): ")
-			// Expand ~ to home directory
-			if strings.HasPrefix(keyPath, "~") {
-				keyPath = filepath.Join(homeDir, keyPath[1:])
+			fmt.Println("Using SSH key authentication.")
+			keyPath = promptForSSHKey()
+			if keyPath == "" {
+				return
 			}
 		}
-	}
 
 	// Encrypt password if provided
 	encryptedPassword := ""
@@ -2499,12 +2463,16 @@ func SortServers(sm *ServerManager, jm *JumpManager) {
 	
 	// Update the managers
 	sm.Servers = newServers
-	sm.Save()
+	if err := sm.Save(); err != nil {
+		fmt.Printf("Error saving server data: %v\n", err)
+	}
 	
 	jm.Graph = newGraph
-	jm.Save()
+	if err := jm.Save(); err != nil {
+		fmt.Printf("Error saving jump data: %v\n", err)
+	}
 	
-	fmt.Printf(success("Sorting completed!\n"))
+	fmt.Print(success("Sorting completed!\n"))
 	fmt.Printf("  - %d servers reordered\n", len(sm.Servers))
 	fmt.Printf("  - %d jump relations updated\n", updatedRelations)
 }
@@ -2642,43 +2610,9 @@ func PromptEditServer(sm *ServerManager, jm *JumpManager) {
 			newPassword = encrypted
 		} else {
 			fmt.Println("Using SSH key authentication.")
-			
-			// Find available SSH keys
-			homeDir, _ := os.UserHomeDir()
-			sshDir := filepath.Join(homeDir, ".ssh")
-			availableKeys, err := findSSHKeys(sshDir)
-			if err != nil {
-				fmt.Printf("❌ Error finding SSH keys: %v\n", err)
+			newKeyPath = promptForSSHKey()
+			if newKeyPath == "" {
 				return
-			}
-			
-			if len(availableKeys) > 0 {
-				fmt.Println("\nAvailable SSH keys:")
-				for i, key := range availableKeys {
-					fmt.Printf("  %d) %s\n", i+1, key)
-				}
-				fmt.Printf("  %d) Enter custom path\n", len(availableKeys)+1)
-				
-				choice := PromptInput(fmt.Sprintf("\nSelect SSH key (1-%d): ", len(availableKeys)+1))
-				choiceNum, err := strconv.Atoi(choice)
-				if err != nil || choiceNum < 1 || choiceNum > len(availableKeys)+1 {
-					fmt.Println("❌ Invalid selection. Edit cancelled.")
-					return
-				} else if choiceNum <= len(availableKeys) {
-					newKeyPath = availableKeys[choiceNum-1]
-					fmt.Printf("✅ Selected: %s\n", newKeyPath)
-				} else {
-					newKeyPath = PromptInput("Enter SSH key path (e.g., ~/.ssh/my_key): ")
-					if strings.HasPrefix(newKeyPath, "~") {
-						newKeyPath = filepath.Join(homeDir, newKeyPath[1:])
-					}
-				}
-			} else {
-				fmt.Println("No SSH keys found in ~/.ssh/")
-				newKeyPath = PromptInput("Enter SSH key path (e.g., ~/.ssh/my_key): ")
-				if strings.HasPrefix(newKeyPath, "~") {
-					newKeyPath = filepath.Join(homeDir, newKeyPath[1:])
-				}
 			}
 		}
 	} else {
@@ -2722,7 +2656,10 @@ func PromptEditServer(sm *ServerManager, jm *JumpManager) {
 		}
 	}
 
-	sm.Save()
+	if err := sm.Save(); err != nil {
+		fmt.Printf("Error saving server data: %v\n", err)
+		return
+	}
 	fmt.Printf("✅ Server '%s' updated successfully!\n", updatedServer.Name)
 	if idChanged {
 		fmt.Printf("🔄 Server ID changed from %d to %d\n", serverID, newID)
@@ -2771,7 +2708,7 @@ func ExportData(sm *ServerManager, jm *JumpManager) {
 		return
 	}
 	
-	fmt.Printf(success("Data exported successfully!\n"))
+	fmt.Print(success("Data exported successfully!\n"))
 	fmt.Printf("  File: %s\n", colorize(Cyan, filePath))
 	fmt.Printf("  Servers: %d\n", len(sm.Servers))
 	fmt.Printf("  Jump relations: %d\n", jm.Graph.GetJumpCount())
@@ -2842,8 +2779,7 @@ func ImportData(sm *ServerManager, jm *JumpManager) {
 		JumpRelations []JumpRelation `json:"jump_relations"` // For backward compatibility
 	}
 	
-	err = json.Unmarshal(data, &importData)
-	if err != nil {
+	if err := json.Unmarshal(data, &importData); err != nil {
 		fmt.Printf(errorMsg("Error parsing JSON: %v\n"), err)
 		return
 	}
@@ -2937,10 +2873,14 @@ func ImportData(sm *ServerManager, jm *JumpManager) {
 	}
 	
 	// Save data
-	sm.Save()
-	jm.Save()
+	if err := sm.Save(); err != nil {
+		fmt.Printf("Error saving server data: %v\n", err)
+	}
+	if err := jm.Save(); err != nil {
+		fmt.Printf("Error saving jump data: %v\n", err)
+	}
 	
-	fmt.Printf(success("Data imported successfully!\n"))
+	fmt.Print(success("Data imported successfully!\n"))
 	fmt.Printf("  Servers: %d\n", len(sm.Servers))
 	fmt.Printf("  Jump relations: %d\n", jm.Graph.GetJumpCount())
 }
@@ -3325,4 +3265,47 @@ Host %s
 	}
 	
 	return tempFile.Name()
+}
+
+// promptForSSHKey prompts user to select an SSH key and returns the selected path
+func promptForSSHKey() string {
+	homeDir, _ := os.UserHomeDir()
+	sshDir := filepath.Join(homeDir, ".ssh")
+	availableKeys, err := findSSHKeys(sshDir)
+	if err != nil {
+		fmt.Printf("❌ Error finding SSH keys: %v\n", err)
+		return ""
+	}
+	
+	if len(availableKeys) > 0 {
+		fmt.Println("\nAvailable SSH keys:")
+		for i, key := range availableKeys {
+			fmt.Printf("  %d) %s\n", i+1, key)
+		}
+		fmt.Printf("  %d) Enter custom path\n", len(availableKeys)+1)
+		
+		choice := PromptInput(fmt.Sprintf("\nSelect SSH key (1-%d): ", len(availableKeys)+1))
+		choiceNum, err := strconv.Atoi(choice)
+		if err != nil || choiceNum < 1 || choiceNum > len(availableKeys)+1 {
+			fmt.Println("❌ Invalid selection. Please try again.")
+			return ""
+		} else if choiceNum <= len(availableKeys) {
+			keyPath := availableKeys[choiceNum-1]
+			fmt.Printf("✅ Selected: %s\n", keyPath)
+			return keyPath
+		} else {
+			keyPath := PromptInput("Enter SSH key path (e.g., ~/.ssh/my_key): ")
+			if strings.HasPrefix(keyPath, "~") {
+				keyPath = filepath.Join(homeDir, keyPath[1:])
+			}
+			return keyPath
+		}
+	} else {
+		fmt.Println("No SSH keys found in ~/.ssh/")
+		keyPath := PromptInput("Enter SSH key path (e.g., ~/.ssh/my_key): ")
+		if strings.HasPrefix(keyPath, "~") {
+			keyPath = filepath.Join(homeDir, keyPath[1:])
+		}
+		return keyPath
+	}
 }
