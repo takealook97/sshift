@@ -1222,53 +1222,22 @@ func PromptInput(prompt string) string {
 	return input
 }
 
-// validatePasswordBasic validates basic password requirements for server storage
-func validatePasswordBasic(password string) error {
-	if password == "" {
-		return fmt.Errorf("password cannot be empty")
-	}
-
-	if len(password) > MaxPasswordLength {
-		return fmt.Errorf("password too long, maximum %d characters allowed", MaxPasswordLength)
-	}
-
-	// Check for null bytes or other problematic characters
-	if strings.Contains(password, "\x00") {
-		return fmt.Errorf("password contains invalid characters")
-	}
-
-	return nil
-}
-
 // PromptInputSecure prompts for sensitive input (like passwords) with additional security
 func PromptInputSecure(prompt string) (string, error) {
 	fmt.Print(prompt)
 
-	bytePassword, err := term.ReadPassword(syscall.Stdin)
+	// Platform-specific stdin handling
+	var bytePassword []byte
+	var err error
+
+	// Platform-specific stdin handling
+	bytePassword, err = term.ReadPassword(int(syscall.Stdin))
 	if err != nil {
 		return "", fmt.Errorf("failed to read password: %w", err)
 	}
 
 	fmt.Println() // Add newline after password input
-
-	password := string(bytePassword)
-
-	// Clear password from memory
-	for i := range bytePassword {
-		bytePassword[i] = 0
-	}
-
-	// Basic validation
-	if password == "" {
-		return "", fmt.Errorf("password cannot be empty")
-	}
-
-	// Validate basic password requirements
-	if err := validatePasswordBasic(password); err != nil {
-		return "", err
-	}
-
-	return password, nil
+	return string(bytePassword), nil
 }
 
 func PromptAddServer(sm *ServerManager) {
@@ -2762,7 +2731,7 @@ func PromptEditServer(sm *ServerManager, jm *JumpManager) {
 		if strings.EqualFold(usePassword, YesResponse) || strings.EqualFold(usePassword, YesResponseFull) {
 			fmt.Print("Enter new password: ")
 
-			bytePassword, err := term.ReadPassword(syscall.Stdin)
+			bytePassword, err := term.ReadPassword(int(syscall.Stdin))
 			if err != nil {
 				fmt.Println("Error reading password:", err)
 				return
@@ -2775,7 +2744,7 @@ func PromptEditServer(sm *ServerManager, jm *JumpManager) {
 			// Confirm password
 			fmt.Print("Confirm new password: ")
 
-			bytePasswordConfirm, err := term.ReadPassword(syscall.Stdin)
+			bytePasswordConfirm, err := term.ReadPassword(int(syscall.Stdin))
 			if err != nil {
 				fmt.Println("Error reading password confirmation:", err)
 				return

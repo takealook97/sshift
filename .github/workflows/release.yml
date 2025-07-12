@@ -62,7 +62,17 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 0
         run: |
+          # Clean any existing binary
+          rm -f ${{ matrix.binary_name }}
+
+          # Build with proper flags
           go build -ldflags "-X main.Version=${{ github.ref_name }} -s -w" -o ${{ matrix.binary_name }} main.go
+
+          # Verify binary was created
+          if [ ! -f "${{ matrix.binary_name }}" ]; then
+            echo "❌ Binary was not created"
+            exit 1
+          fi
 
       - name: Verify binary
         run: |
