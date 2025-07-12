@@ -437,7 +437,7 @@ func (s *Server) Validate() error {
 		// Check file permissions
 		if info, err := os.Stat(s.KeyPath); err == nil {
 			mode := info.Mode()
-			if mode.Perm() != 0o400 {
+			if mode.Perm() != SSHKeyPermOwnerOnly {
 				return fmt.Errorf("SSH key file has loose permissions (%s), should be 400", mode.String())
 			}
 		}
@@ -469,7 +469,7 @@ func findSSHKeys(sshDir string) ([]string, error) {
 			// Validate file permissions (should be 400 or 600)
 			if info, err := os.Stat(keyPath); err == nil {
 				mode := info.Mode()
-				if mode.Perm() != 0o400 {
+				if mode.Perm() != SSHKeyPermOwnerOnly {
 					fmt.Printf(warning("Warning: SSH key %s has loose permissions (%s)\n"), keyPath, mode.String())
 				}
 			}
@@ -494,7 +494,7 @@ func findSSHKeys(sshDir string) ([]string, error) {
 			// Validate file permissions (should be 400 or 600)
 			if info, err := os.Stat(keyPath); err == nil {
 				mode := info.Mode()
-				if mode.Perm() != 0o400 {
+				if mode.Perm() != SSHKeyPermOwnerOnly {
 					fmt.Printf(warning("Warning: SSH key %s has loose permissions (%s)\n"), keyPath, mode.String())
 				}
 			}
@@ -2064,7 +2064,7 @@ func createSSHClient(host, user, password, keyPath string) (*ssh.Client, error) 
 		// Validate key file permissions (allow 400 or 600)
 		if info, err := os.Stat(keyPath); err == nil {
 			mode := info.Mode()
-			if mode.Perm() != 0o400 {
+			if mode.Perm() != SSHKeyPermOwnerOnly {
 				return nil, fmt.Errorf("SSH key file %s has loose permissions (%s), should be 400", keyPath, mode.String())
 			}
 		}
