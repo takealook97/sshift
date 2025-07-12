@@ -20,15 +20,43 @@ jobs:
         run: |
           VERSION=${GITHUB_REF#refs/tags/}
           SOURCE_URL="https://github.com/takealook97/sshift/archive/refs/tags/${VERSION}.tar.gz"
-          SHA256=$(curl -sL "$SOURCE_URL" | shasum -a 256 | cut -d' ' -f1)
+
+          # Retry download if it fails
+          for i in {1..3}; do
+            echo "Attempt $i: Downloading source for SHA256 calculation..."
+            SHA256=$(curl -sL "$SOURCE_URL" | shasum -a 256 | cut -d' ' -f1)
+            if [ -n "$SHA256" ] && [ "$SHA256" != "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" ]; then
+              echo "SHA256 calculated successfully: $SHA256"
+              break
+            else
+              echo "Download failed or empty file, retrying..."
+              sleep 2
+            fi
+          done
+
+          if [ -z "$SHA256" ] || [ "$SHA256" = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" ]; then
+            echo "❌ Failed to calculate SHA256 after 3 attempts"
+            exit 1
+          fi
+
           echo "sha256=$SHA256" >> $GITHUB_OUTPUT
           echo "version=${VERSION#v}" >> $GITHUB_OUTPUT
 
       - name: Update Formula
         run: |
           cd homebrew-tap
+
+          # Check if sshift.rb exists
+          if [ ! -f "sshift.rb" ]; then
+            echo "❌ sshift.rb not found in homebrew-tap repository"
+            exit 1
+          fi
+
+          # Update version and SHA256
           sed -i "s/version \".*\"/version \"${{ steps.sha256.outputs.version }}\"/" sshift.rb
           sed -i "s/sha256 \".*\"/sha256 \"${{ steps.sha256.outputs.sha256 }}\"/" sshift.rb
+
+          echo "✅ Formula updated successfully"
 
       - name: Commit and push
         run: |
@@ -36,5 +64,11 @@ jobs:
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
           git add sshift.rb
-          git commit -m "Update sshift to ${{ steps.sha256.outputs.version }}"
-          git push
+
+          # Check if there are changes to commit
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Update sshift to ${{ steps.sha256.outputs.version }}"
+            git push
+          fi

@@ -37,20 +37,27 @@ jobs:
       - name: Run performance benchmarks
         run: |
           echo "🔍 Running performance benchmarks..."
-          go test -bench=. -benchmem -benchtime=5s ./... > benchmark-results.txt 2>&1 || true
 
-          echo "📊 Benchmark Results:"
-          if [ -f benchmark-results.txt ]; then
-            cat benchmark-results.txt
-          else
-            echo "No benchmark results generated"
-          fi
+          # Check if there are any benchmark tests
+          if find . -name "*_test.go" -exec grep -l "Benchmark" {} \; | head -1; then
+            go test -bench=. -benchmem -benchtime=5s ./... > benchmark-results.txt 2>&1 || true
+            
+            echo "📊 Benchmark Results:"
+            if [ -f benchmark-results.txt ]; then
+              cat benchmark-results.txt
+            else
+              echo "No benchmark results generated"
+            fi
 
-          # 성능 임계값 검사 (예시)
-          if [ -f benchmark-results.txt ] && grep -q "Benchmark.*[0-9]\{4,\}ns/op" benchmark-results.txt; then
-            echo "⚠️ Warning: Some operations are taking longer than expected"
+            # Performance threshold check (example)
+            if [ -f benchmark-results.txt ] && grep -q "Benchmark.*[0-9]\{4,\}ns/op" benchmark-results.txt; then
+              echo "⚠️ Warning: Some operations are taking longer than expected"
+            else
+              echo "✅ Performance benchmarks passed"
+            fi
           else
-            echo "✅ Performance benchmarks passed"
+            echo "⚠️ No benchmark tests found in the codebase"
+            echo "Consider adding benchmark tests for performance monitoring"
           fi
 
       - name: Upload benchmark results
@@ -65,13 +72,20 @@ jobs:
       - name: Memory usage test
         run: |
           echo "🧠 Testing memory usage..."
-          go test -bench=BenchmarkMemory -benchmem -benchtime=10s ./... > memory-results.txt 2>&1 || true
 
-          echo "📊 Memory Usage Results:"
-          if [ -f memory-results.txt ]; then
-            cat memory-results.txt
+          # Check if there are memory benchmark tests
+          if find . -name "*_test.go" -exec grep -l "BenchmarkMemory" {} \; | head -1; then
+            go test -bench=BenchmarkMemory -benchmem -benchtime=10s ./... > memory-results.txt 2>&1 || true
+
+            echo "📊 Memory Usage Results:"
+            if [ -f memory-results.txt ]; then
+              cat memory-results.txt
+            else
+              echo "No memory results generated"
+            fi
           else
-            echo "No memory results generated"
+            echo "⚠️ No memory benchmark tests found"
+            echo "Consider adding BenchmarkMemory tests for memory monitoring"
           fi
 
       - name: Upload memory results

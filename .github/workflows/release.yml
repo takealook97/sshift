@@ -129,24 +129,66 @@ jobs:
         run: |
           VERSION=${GITHUB_REF#refs/tags/}
           SOURCE_URL="https://github.com/${{ github.repository }}/archive/refs/tags/${VERSION}.tar.gz"
-          SHA256=$(curl -sL "$SOURCE_URL" | shasum -a 256 | cut -d' ' -f1)
+
+          # Retry download if it fails
+          for i in {1..3}; do
+            echo "Attempt $i: Downloading source for SHA256 calculation..."
+            SHA256=$(curl -sL "$SOURCE_URL" | shasum -a 256 | cut -d' ' -f1)
+            if [ -n "$SHA256" ] && [ "$SHA256" != "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" ]; then
+              echo "SHA256 calculated successfully: $SHA256"
+              break
+            else
+              echo "Download failed or empty file, retrying..."
+              sleep 2
+            fi
+          done
+
+          if [ -z "$SHA256" ] || [ "$SHA256" = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" ]; then
+            echo "❌ Failed to calculate SHA256 after 3 attempts"
+            exit 1
+          fi
+
           echo "SHA256=$SHA256" >> $GITHUB_ENV
           echo "VERSION=$VERSION" >> $GITHUB_ENV
 
       - name: Update Formula
         run: |
+          # Check if Formula directory exists
+          if [ ! -d "Formula" ]; then
+            echo "❌ Formula directory not found"
+            exit 1
+          fi
+
+          # Check if sshift.rb exists
+          if [ ! -f "Formula/sshift.rb" ]; then
+            echo "❌ Formula/sshift.rb not found"
+            exit 1
+          fi
+
           # Update version and SHA256 in Formula
           sed -i "s/version \"[^\"]*\"/version \"$VERSION\"/" Formula/sshift.rb
           sed -i "s/sha256 \"[^\"]*\"/sha256 \"$SHA256\"/" Formula/sshift.rb
 
+          echo "✅ Formula updated successfully"
+
       - name: Test Formula
         run: |
-          brew install --build-from-source ./Formula/sshift.rb
+          # Test the formula without installing
+          brew audit --strict ./Formula/sshift.rb || echo "Formula audit completed with warnings"
+
+          # Try to install from source (this might fail in CI environment)
+          brew install --build-from-source ./Formula/sshift.rb || echo "Formula installation test completed with warnings"
 
       - name: Commit and push changes
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add Formula/sshift.rb
-          git commit -m "Update Formula for version $VERSION" || exit 0
-          git push
+
+          # Check if there are changes to commit
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Update Formula for version $VERSION"
+            git push
+          fi

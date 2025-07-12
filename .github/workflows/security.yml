@@ -44,19 +44,22 @@ jobs:
           # Try multiple installation methods for Gosec
           echo "Attempting to install Gosec..."
 
-          # Method 1: Direct binary download
-          if ! command -v gosec &> /dev/null; then
-            echo "Trying direct binary download..."
-            curl -sfL https://github.com/securecodewarrior/gosec/releases/download/v2.19.0/gosec_2.19.0_linux_amd64.tar.gz | tar -xz
-            sudo mv gosec /usr/local/bin/
-            echo "/usr/local/bin" >> $GITHUB_PATH
-          fi
+          # Method 1: Go install (preferred method)
+          echo "Trying go install method..."
+          go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
-          # Method 2: Go install (if Method 1 fails)
+          # Method 2: Direct binary download (fallback)
           if ! command -v gosec &> /dev/null; then
-            echo "Trying go install method..."
-            go install github.com/securecodewarrior/gosec/v2/cmd/gosec@v2.19.0
-            echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+            echo "Go install failed, trying direct binary download..."
+            # Download to temporary file first
+            curl -L -o gosec.tar.gz https://github.com/securecodewarrior/gosec/releases/latest/download/gosec_$(uname -s)_$(uname -m).tar.gz
+            if [ -f gosec.tar.gz ]; then
+              tar -xzf gosec.tar.gz
+              sudo mv gosec /usr/local/bin/
+              echo "/usr/local/bin" >> $GITHUB_PATH
+              rm gosec.tar.gz
+            fi
           fi
 
           # Method 3: Skip if both methods fail
