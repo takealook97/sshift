@@ -2366,7 +2366,7 @@ func RunMenu(sm *ServerManager, jm *JumpManager) {
 			printLogo()
 			PrintEmptyMenu()
 
-			input := PromptInput(prompt("\nSelect an option: "))
+			input := PromptInput(prompt("Select an option: "))
 
 			index, err := strconv.Atoi(input)
 			if err != nil || (index != 0 && index != 1) {
