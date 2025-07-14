@@ -5,7 +5,7 @@ class Sshift < Formula
   license "MIT"
 
   url "https://github.com/takealook97/sshift/archive/refs/tags/v1.3.6.tar.gz"
-  sha256 "533a340d37170d91186106b264f293f4dcc7584858b2311906eadde4ab266275"
+  sha256 "bef5b745118336283b66e8748ed0e5952c82d6413210f51e6c4647884932611f"
 
   depends_on "go" => :build
 

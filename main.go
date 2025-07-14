@@ -1843,7 +1843,8 @@ func ConnectWithJump(fromServer, toServer Server) {
 	// pem/pass: jump=pem, target=pass
 	if fromKeyPath != "" && toPassword != "" && fromPassword == "" && toKeyPath == "" {
 		fmt.Println("🔐 Using ProxyCommand with jump key and target password")
-		proxyCmd := fmt.Sprintf("ssh -i %s -W %%h:%%p -o StrictHostKeyChecking=no %s@%s", fromKeyPath, fromServer.User, fromServer.Host)
+		proxyCmd := fmt.Sprintf("ssh -i %s -W %%h:%%p -o StrictHostKeyChecking=no %s@%s",
+			fromKeyPath, fromServer.User, fromServer.Host)
 		sshArgs := []string{
 			"-p", toPassword,
 			"ssh",
@@ -1863,7 +1864,8 @@ func ConnectWithJump(fromServer, toServer Server) {
 	// pem/pem: ProxyCommand with separate keys for jump and target
 	if fromKeyPath != "" && toKeyPath != "" && fromPassword == "" && toPassword == "" {
 		fmt.Println("🔐 Using ProxyCommand with separate keys for jump and target")
-		proxyCmd := fmt.Sprintf("ssh -i %s -W %%h:%%p -o StrictHostKeyChecking=no %s@%s", fromKeyPath, fromServer.User, fromServer.Host)
+		proxyCmd := fmt.Sprintf("ssh -i %s -W %%h:%%p -o StrictHostKeyChecking=no %s@%s",
+			fromKeyPath, fromServer.User, fromServer.Host)
 		sshArgs := []string{
 			"-o", fmt.Sprintf("ProxyCommand=%s", proxyCmd),
 			"-i", toKeyPath,
@@ -2112,7 +2114,8 @@ func connectWithSSHPass(fromServer, toServer Server) {
 		return
 	}
 
-	proxyCmd := fmt.Sprintf("sshpass -p '%s' ssh -W %%h:%%p -o StrictHostKeyChecking=no %s@%s", fromPassword, fromServer.User, fromServer.Host)
+	proxyCmd := fmt.Sprintf("sshpass -p '%s' ssh -W %%h:%%p -o StrictHostKeyChecking=no %s@%s",
+		fromPassword, fromServer.User, fromServer.Host)
 	sshArgs := []string{
 		"-p", toPassword,
 		"ssh",
@@ -2130,203 +2133,7 @@ func connectWithSSHPass(fromServer, toServer Server) {
 	handleSSHError(err, "SSH jump connection with double sshpass")
 }
 
-// connectWithProgrammaticSSH connects through jump server using Go's SSH package
-func connectWithProgrammaticSSH(fromServer, toServer Server) {
-	var err error
 
-	fmt.Println("🔐 Using programmatic SSH connection")
-
-	// Get passwords
-	fromPassword, err := fromServer.GetDecryptedPassword()
-	if err != nil {
-		fmt.Printf("❌ Failed to decrypt from server password: %v\n", err)
-		fmt.Println("Press Enter to return to menu...")
-		bufio.NewScanner(os.Stdin).Scan()
-
-		return
-	}
-
-	toPassword, err := toServer.GetDecryptedPassword()
-	if err != nil {
-		fmt.Printf("❌ Failed to decrypt to server password: %v\n", err)
-		fmt.Println("Press Enter to return to menu...")
-		bufio.NewScanner(os.Stdin).Scan()
-
-		return
-	}
-
-	// Fixed: Allow SSH key authentication without requiring passwords
-	// Check if both servers have at least one authentication method
-	fromHasAuth := fromPassword != "" || fromServer.KeyPath != ""
-	toHasAuth := toPassword != "" || toServer.KeyPath != ""
-
-	if !fromHasAuth || !toHasAuth {
-		fmt.Println("❌ Both servers need authentication (password or SSH key)")
-		fmt.Println("Press Enter to return to menu...")
-		bufio.NewScanner(os.Stdin).Scan()
-
-		return
-	}
-
-	// Connect to jump server
-	fmt.Printf("🔄 Connecting to jump server: %s@%s\n", fromServer.User, fromServer.Host)
-
-	jumpClient, err := createSSHClient(fromServer.Host, fromServer.User, fromPassword, fromServer.KeyPath)
-	if err != nil {
-		fmt.Printf("❌ Failed to connect to jump server: %v\n", err)
-		fmt.Println("Press Enter to return to menu...")
-		bufio.NewScanner(os.Stdin).Scan()
-
-		return
-	}
-
-	defer jumpClient.Close()
-
-	// Connect to target server through jump server
-	fmt.Printf("🔄 Connecting to target server: %s@%s\n", toServer.User, toServer.Host)
-
-	targetClient, err := jumpClient.Dial("tcp", toServer.Host+":22")
-	if err != nil {
-		fmt.Printf("❌ Failed to connect to target server: %v\n", err)
-		fmt.Println("Press Enter to return to menu...")
-		bufio.NewScanner(os.Stdin).Scan()
-
-		return
-	}
-
-	defer targetClient.Close()
-
-	// Create SSH connection to target server
-	var targetAuthMethods []ssh.AuthMethod
-
-	// Add password authentication if provided
-	if toPassword != "" {
-		targetAuthMethods = append(targetAuthMethods, ssh.Password(toPassword))
-	}
-
-	// Add key authentication if provided
-	if toServer.KeyPath != "" {
-		keyBytes, err := os.ReadFile(toServer.KeyPath)
-
-		if err != nil {
-			fmt.Printf("❌ Failed to read target server key file: %v\n", err)
-			fmt.Println("Press Enter to return to menu...")
-			bufio.NewScanner(os.Stdin).Scan()
-
-			return
-		}
-
-		signer, err := ssh.ParsePrivateKey(keyBytes)
-
-		if err != nil {
-			fmt.Printf("❌ Failed to parse target server private key: %v\n", err)
-			fmt.Println("Press Enter to return to menu...")
-			bufio.NewScanner(os.Stdin).Scan()
-
-			return
-		}
-
-		targetAuthMethods = append(targetAuthMethods, ssh.PublicKeys(signer))
-	}
-
-	if len(targetAuthMethods) == 0 {
-		fmt.Println("❌ No authentication method available for target server")
-		fmt.Println("Press Enter to return to menu...")
-		bufio.NewScanner(os.Stdin).Scan()
-
-		return
-	}
-
-	var hostKeyCallback ssh.HostKeyCallback
-
-	knownHostsPath := filepath.Join(os.Getenv("HOME"), ".ssh", "known_hosts")
-
-	// Use InsecureIgnoreHostKey for password authentication only
-	if toPassword != "" && toServer.KeyPath == "" {
-		hostKeyCallback = ssh.InsecureIgnoreHostKey()
-	} else {
-		hostKeyCallback, err = knownhosts.New(knownHostsPath)
-		if err != nil {
-			fmt.Printf("❌ Could not find or read known_hosts file. Host key verification is required: %v\n", err)
-			fmt.Println("Press Enter to return to menu...")
-			bufio.NewScanner(os.Stdin).Scan()
-
-			return
-		}
-	}
-
-	sshConn, chans, reqs, err := ssh.NewClientConn(targetClient, toServer.Host+":22", &ssh.ClientConfig{
-		User:            toServer.User,
-		Auth:            targetAuthMethods,
-		HostKeyCallback: hostKeyCallback,
-		Timeout:         SSHTimeoutSeconds * time.Second,
-	})
-	if err != nil {
-		fmt.Printf("❌ Failed to establish SSH connection to target: %v\n", err)
-		fmt.Println("Press Enter to return to menu...")
-		bufio.NewScanner(os.Stdin).Scan()
-
-		return
-	}
-
-	defer sshConn.Close()
-
-	client := ssh.NewClient(sshConn, chans, reqs)
-	defer client.Close()
-
-	session, err := client.NewSession()
-	if err != nil {
-		fmt.Printf("❌ Failed to create session: %v\n", err)
-		fmt.Println("Press Enter to return to menu...")
-		bufio.NewScanner(os.Stdin).Scan()
-
-		return
-	}
-
-	defer session.Close()
-	// 표준 입출력 바인딩 (PTY와 함께 사용)
-	session.Stdout = os.Stdout
-	session.Stderr = os.Stderr
-	session.Stdin = os.Stdin
-	modes := ssh.TerminalModes{
-		ssh.ECHO:          0,
-		ssh.ECHOCTL:       0,
-		ssh.ECHOKE:        0,
-		ssh.ECHONL:        0,
-		ssh.ICANON:        1,
-		ssh.ISIG:          1,
-		ssh.TTY_OP_ISPEED: TTYISpeed,
-		ssh.TTY_OP_OSPEED: TTYOSpeed,
-		ssh.OPOST:         0,
-		ssh.ONLCR:         0,
-		ssh.OCRNL:         0,
-		ssh.ONOCR:         0,
-		ssh.IXON:          1,
-		ssh.IXOFF:         1,
-		ssh.IXANY:         0,
-		ssh.IMAXBEL:       1,
-		ssh.IUTF8:         1,
-	}
-
-	if err := session.RequestPty("xterm", TTYRows, TTYCols, modes); err != nil {
-		fmt.Printf("❌ Failed to request PTY: %v\n", err)
-		fmt.Println("Press Enter to return to menu...")
-		bufio.NewScanner(os.Stdin).Scan()
-
-		return
-	}
-
-	if err := session.Shell(); err != nil {
-		fmt.Printf("❌ Failed to start shell: %v\n", err)
-		fmt.Println("Press Enter to return to menu...")
-		bufio.NewScanner(os.Stdin).Scan()
-
-		return
-	}
-
-	err = session.Wait()
-	handleSSHSessionEnd(session, err)
-}
 
 // handleSSHSessionEnd handles SSH session end with consistent error reporting
 func handleSSHSessionEnd(session *ssh.Session, err error) {
@@ -3435,92 +3242,9 @@ func printHelp() {
 	fmt.Println("  - Use 'sshift key' to view encryption information")
 }
 
-// createTempSSHConfigForJump creates a temporary SSH config file for sshpass jump connections
-func createTempSSHConfigForJump(fromServer, toServer Server) string {
-	// Create temporary file with secure permissions
-	tempFile, err := os.CreateTemp("", "sshift_sshpass_config_*.conf")
-	if err != nil {
-		return ""
-	}
 
-	// Set secure file permissions (owner read/write only)
-	if err := os.Chmod(tempFile.Name(), FilePermOwnerOnly); err != nil {
-		os.Remove(tempFile.Name())
-		return ""
-	}
 
-	defer tempFile.Close()
 
-	// Write SSH config content for jump connection
-	configContent := fmt.Sprintf(`Host %s
-  HostName %s
-  User %s
-  StrictHostKeyChecking no
-  UserKnownHostsFile /dev/null
-
-Host %s
-  HostName %s
-  User %s
-  StrictHostKeyChecking no
-  UserKnownHostsFile /dev/null
-`,
-		fromServer.Host, fromServer.Host, fromServer.User,
-		toServer.Host, toServer.Host, toServer.User)
-
-	_, err = tempFile.WriteString(configContent)
-	if err != nil {
-		os.Remove(tempFile.Name())
-		return ""
-	}
-
-	return tempFile.Name()
-}
-
-// createTempSSHConfig creates a temporary SSH config file for jump connections
-func createTempSSHConfig(fromServer, toServer Server) string {
-	// Only create config if target server has a specific key
-	if toServer.KeyPath == "" {
-		return ""
-	}
-
-	// Create temporary file with secure permissions
-	tempFile, err := os.CreateTemp("", "sshift_ssh_config_*.conf")
-	if err != nil {
-		return ""
-	}
-
-	// Set secure file permissions (owner read/write only)
-	if err := os.Chmod(tempFile.Name(), FilePermOwnerOnly); err != nil {
-		os.Remove(tempFile.Name())
-		return ""
-	}
-
-	defer tempFile.Close()
-
-	// Write SSH config content
-	configContent := fmt.Sprintf(`Host %s
-  HostName %s
-  User %s
-  IdentityFile %s
-  StrictHostKeyChecking no
-
-Host %s
-  HostName %s
-  User %s
-  IdentityFile %s
-  StrictHostKeyChecking no
-`,
-		fromServer.Host, fromServer.Host, fromServer.User, fromServer.KeyPath,
-		toServer.Host, toServer.Host, toServer.User, toServer.KeyPath)
-
-	_, err = tempFile.WriteString(configContent)
-	if err != nil {
-		os.Remove(tempFile.Name())
-		return ""
-	}
-
-	return tempFile.Name()
-}
 
 // promptForSSHKey prompts user to select an SSH key and returns the selected path
 func promptForSSHKey() string {
