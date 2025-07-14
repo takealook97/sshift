@@ -526,7 +526,7 @@ func TestJumpGraph(t *testing.T) {
 }
 
 func TestFileOperationsWithEncryption(t *testing.T) {
-	t.Parallel()
+	// Don't run in parallel to avoid race conditions with file operations
 	os.Setenv("SSHIFT_ENCRYPTION_KEY", "test-key-32-bytes-long-for-aes-256")
 
 	tempDir := t.TempDir()
@@ -577,7 +577,7 @@ func TestFileOperationsWithEncryption(t *testing.T) {
 
 // Test jump manager with file operations
 func TestJumpManagerFileOperations(t *testing.T) {
-	t.Parallel()
+	// Don't run in parallel to avoid race conditions with file operations
 
 	tempDir := t.TempDir()
 	jm := NewJumpManager(tempDir)
@@ -864,8 +864,7 @@ func BenchmarkMemory(b *testing.B) {
 
 // Test CLI entrypoints and menu logic
 func TestRunMenuAndCLIEntrypoints(t *testing.T) {
-	t.Parallel()
-
+	// Don't run in parallel to avoid race conditions with os.Stdin
 	os.Setenv("SSHIFT_TEST_MODE", "1")
 
 	tempDir := t.TempDir()
@@ -967,7 +966,7 @@ func TestPrintServerListAndJumpList(t *testing.T) {
 }
 
 func TestPromptInput(t *testing.T) {
-	t.Parallel()
+	// Don't run in parallel to avoid race conditions with os.Stdin
 	pr, pw, _ := os.Pipe()
 	oldStdin := os.Stdin
 	os.Stdin = pr
