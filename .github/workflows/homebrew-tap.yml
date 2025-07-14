@@ -14,7 +14,6 @@ jobs:
           repository: takealook97/homebrew-sshift
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: homebrew-tap
-          ref: main
 
       - name: Calculate SHA256
         id: sha256
@@ -63,8 +62,16 @@ jobs:
         run: |
           cd homebrew-tap
 
-          # Ensure we're on main branch
-          git checkout main
+          # Check available branches and use the default branch
+          echo "Available branches:"
+          git branch -a
+
+          # Get the default branch (usually master or main)
+          DEFAULT_BRANCH=$(git remote show origin | grep 'HEAD branch' | cut -d' ' -f5)
+          echo "Default branch: $DEFAULT_BRANCH"
+
+          # Ensure we're on the default branch
+          git checkout $DEFAULT_BRANCH
 
           # Configure git
           git config user.name "GitHub Actions"
@@ -83,5 +90,5 @@ jobs:
           else
             echo "Changes detected, committing..."
             git commit -m "Update sshift to ${{ steps.sha256.outputs.version }}"
-            git push origin main
+            git push origin $DEFAULT_BRANCH
           fi
