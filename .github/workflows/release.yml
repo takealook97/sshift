@@ -62,37 +62,27 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 0
         run: |
-          # Clean any existing binary
-          rm -f ${{ matrix.binary_name }}
-
-          # Build with proper flags
-          go build -ldflags "-X main.Version=${{ github.ref_name }} -s -w" -o ${{ matrix.binary_name }} main.go
-
-          # Verify binary was created
-          if [ ! -f "${{ matrix.binary_name }}" ]; then
-            echo "❌ Binary was not created"
-            exit 1
-          fi
+          mkdir -p dist
+          go build -ldflags "-X main.Version=${{ github.ref_name }} -s -w" -o dist/${{ matrix.binary_name }} main.go
 
       - name: Verify binary
         run: |
           echo "🔍 Verifying binary..."
-          file ${{ matrix.binary_name }}
-          ls -la ${{ matrix.binary_name }}
+          file dist/${{ matrix.binary_name }}
+          ls -la dist/${{ matrix.binary_name }}
 
-          # Check if binary is executable
           if [[ "${{ matrix.goos }}" == "windows" ]]; then
             echo "Windows binary created successfully"
           else
-            chmod +x ${{ matrix.binary_name }}
+            chmod +x dist/${{ matrix.binary_name }}
             echo "✅ Binary is executable"
           fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.binary_name }}
-          path: ${{ matrix.binary_name }}
+          name: dist
+          path: dist/${{ matrix.binary_name }}
 
   release:
     needs: build
@@ -103,15 +93,14 @@ jobs:
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          files: |
-            sshift-linux-amd64
-            sshift-darwin-amd64
-            sshift-darwin-arm64
-            sshift-windows-amd64.exe
+          files: dist/*
           draft: false
           prerelease: false
         env:
