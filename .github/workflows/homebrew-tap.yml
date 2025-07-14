@@ -15,6 +15,18 @@ jobs:
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: homebrew-tap
 
+      - name: Setup Homebrew
+        run: |
+          # Install Homebrew
+          /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+          # Add Homebrew to PATH
+          echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"' >> $GITHUB_ENV
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+
+          # Verify Homebrew installation
+          brew --version
+
       - name: Calculate SHA256
         id: sha256
         run: |
@@ -46,17 +58,37 @@ jobs:
         run: |
           cd homebrew-tap
 
-          # Check if sshift.rb exists
-          if [ ! -f "sshift.rb" ]; then
-            echo "❌ sshift.rb not found in homebrew-tap repository"
+          # Check if Formula directory exists
+          if [ ! -d "Formula" ]; then
+            echo "❌ Formula directory not found"
             exit 1
           fi
 
-          # Update version and SHA256
-          sed -i "s/version \".*\"/version \"${{ steps.sha256.outputs.version }}\"/" sshift.rb
-          sed -i "s/sha256 \".*\"/sha256 \"${{ steps.sha256.outputs.sha256 }}\"/" sshift.rb
+          # Check if sshift.rb exists in Formula directory
+          if [ ! -f "Formula/sshift.rb" ]; then
+            echo "❌ Formula/sshift.rb not found"
+            exit 1
+          fi
+
+          # Update version and SHA256 in Formula/sshift.rb
+          sed -i "s/version \".*\"/version \"${{ steps.sha256.outputs.version }}\"/" Formula/sshift.rb
+          sed -i "s/sha256 \".*\"/sha256 \"${{ steps.sha256.outputs.sha256 }}\"/" Formula/sshift.rb
 
           echo "✅ Formula updated successfully"
+
+      - name: Test Formula
+        run: |
+          cd homebrew-tap
+
+          # Test the formula without installing
+          brew audit Formula/sshift.rb
+
+          echo "Formula audit completed with warnings"
+
+          # Test formula installation (dry run)
+          brew install --dry-run Formula/sshift.rb
+
+          echo "Formula installation test completed with warnings"
 
       - name: Commit and push
         run: |
@@ -114,7 +146,7 @@ jobs:
           echo "Git status:"
           git status
 
-          git add sshift.rb
+          git add Formula/sshift.rb
 
           # Check if there are changes to commit
           if git diff --staged --quiet; then
