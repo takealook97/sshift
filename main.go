@@ -27,7 +27,7 @@ import (
 )
 
 // Version information (injected during build)
-var Version = "1.3.6"
+var Version = "1.3.7"
 
 // SSHift ASCII Art Logo
 const SSHiftLogo = `
