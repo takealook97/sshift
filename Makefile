@@ -20,16 +20,21 @@ build:
 
 # Release build (optimized)
 .PHONY: release
-release:
+release: clean-release
 	@echo "Building release version..."
 	@mkdir -p $(BUILD_DIR)
+	@echo "Cleaning previous build artifacts..."
 	rm -f $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64
 	rm -f $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64
 	rm -f $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64
 	rm -f $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe
+	@echo "Building for Linux (amd64)..."
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -a -installsuffix cgo -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 main.go
+	@echo "Building for Darwin (amd64)..."
 	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -a -installsuffix cgo -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64 main.go
+	@echo "Building for Darwin (arm64)..."
 	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -a -installsuffix cgo -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64 main.go
+	@echo "Building for Windows (amd64)..."
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -a -installsuffix cgo -o $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe main.go
 	@echo "Release builds complete"
 
@@ -94,6 +99,16 @@ clean:
 	rm -rf $(BUILD_DIR)
 	rm -f coverage.out coverage.html
 	@echo "Clean complete"
+
+# Clean release artifacts only
+.PHONY: clean-release
+clean-release:
+	@echo "Cleaning release artifacts..."
+	rm -f $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64
+	rm -f $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64
+	rm -f $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64
+	rm -f $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe
+	@echo "Release artifacts cleaned"
 
 # Development mode run
 .PHONY: dev
