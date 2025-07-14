@@ -32,11 +32,32 @@ jobs:
         timeout-minutes: 10
         if: hashFiles('**/go.sum') != ''
 
-      - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v3
-        with:
-          version: v1.55.2
-          args: --timeout=5m --verbose
+      - name: Run go fmt
+        run: |
+          echo "🔍 Running go fmt..."
+          if [ "$(go fmt ./...)" ]; then
+            echo "❌ Code formatting issues found. Please run 'go fmt ./...' locally"
+            exit 1
+          else
+            echo "✅ Code formatting is correct"
+          fi
+
+      - name: Run go vet
+        run: |
+          echo "🔍 Running go vet..."
+          go vet ./...
+          echo "✅ go vet completed successfully"
+
+      - name: Install staticcheck
+        run: |
+          echo "📦 Installing staticcheck..."
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+
+      - name: Run staticcheck
+        run: |
+          echo "🔍 Running staticcheck..."
+          staticcheck ./...
+          echo "✅ staticcheck completed successfully"
 
       - name: Run tests
         run: go test -v ./...

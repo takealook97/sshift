@@ -456,9 +456,8 @@ MIT License - see LICENSE file for details.
 ## Recommended Development Environment
 
 - Go: **1.22.x**
-- golangci-lint: **1.55.x** (Does not work with Go 1.24 or higher)
 
-> **Note**: This project uses Go 1.22.x for both local development and CI/CD to ensure compatibility with golangci-lint.
+> **Note**: This project uses Go 1.22.x for both local development and CI/CD to ensure compatibility.
 
 ### Example: Setting up the development environment
 
@@ -476,25 +475,32 @@ brew install go@1.22
 brew unlink go && brew link --force --overwrite go@1.22
 ```
 
-#### Install golangci-lint
-
-```bash
-go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.55.2
-```
-
 ---
 
 ## How to run lint and tests
 
 ```bash
-golangci-lint run --timeout=5m --verbose
+# Code formatting
+go fmt ./...
+
+# Code analysis
+go vet ./...
+
+# Static analysis (optional)
+go install honnef.co/go/tools/cmd/staticcheck@latest
+staticcheck ./...
+
+# Tests
 go test -v ./...
 ```
-
-> ⚠️ golangci-lint does not work with Go 1.24 or higher. Always use Go 1.22.x for linting.
 
 ---
 
 ## CI/CD
 
-GitHub Actions workflows are configured to use Go 1.22.x for consistent builds and linting across all environments.
+GitHub Actions workflows use the following linting tools:
+
+- **go fmt**: Code formatting
+- **go vet**: Code analysis and common mistakes detection
+- **staticcheck**: Advanced static analysis
+- **go test**: Unit tests and coverage
