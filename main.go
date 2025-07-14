@@ -1742,6 +1742,21 @@ func Connect(server Server) {
 		if sshpassCmd.Run() == nil {
 			// sshpass is available, use it for automatic password input
 			fmt.Println("   Using sshpass for automatic password input")
+			sshArgs := []string{
+				"-p", decryptedPassword,
+				"ssh", "-o", "StrictHostKeyChecking=no",
+			}
+			if server.KeyPath != "" {
+				sshArgs = append(sshArgs, "-i", server.KeyPath)
+			}
+			sshArgs = append(sshArgs, fmt.Sprintf("%s@%s", server.User, server.Host))
+			cmd := exec.Command("sshpass", sshArgs...)
+			cmd.Stdin = os.Stdin
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			err = cmd.Run()
+			handleSSHError(err, "SSH connection")
+			return
 		} else {
 			// sshpass not available, use expect-like behavior with Go's SSH package
 			fmt.Println("   sshpass not available, using interactive password input")
@@ -1897,6 +1912,16 @@ func ConnectWithJump(fromServer, toServer Server) {
 	// ProxyJump cannot handle password authentication for target server
 	if toPassword != "" {
 		fmt.Println("🔐 Using programmatic SSH connection (password authentication required)")
+		fmt.Printf("   Jump server auth: %s\n", getAuthType(fromServer))
+		fmt.Printf("   Target server auth: %s\n", getAuthType(toServer))
+		connectWithProgrammaticSSH(fromServer, toServer)
+
+		return
+	}
+
+	// Handle Password → PEM jump (jump server uses password, target uses key)
+	if fromPassword != "" && toKeyPath != "" {
+		fmt.Println("🔐 Using programmatic SSH connection (jump server password auth)")
 		fmt.Printf("   Jump server auth: %s\n", getAuthType(fromServer))
 		fmt.Printf("   Target server auth: %s\n", getAuthType(toServer))
 		connectWithProgrammaticSSH(fromServer, toServer)
