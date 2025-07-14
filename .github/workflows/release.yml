@@ -87,6 +87,8 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -96,10 +98,20 @@ jobs:
         with:
           path: dist
 
+      - name: List downloaded files
+        run: |
+          echo "📁 Checking downloaded artifacts..."
+          ls -la dist/ || echo "dist/ directory not found"
+          find . -name "sshift-*" -type f || echo "No sshift binaries found"
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          files: dist/*
+          files: |
+            dist/sshift-linux-amd64
+            dist/sshift-darwin-amd64
+            dist/sshift-darwin-arm64
+            dist/sshift-windows-amd64.exe
           draft: false
           prerelease: false
         env:
