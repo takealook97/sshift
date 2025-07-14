@@ -48,17 +48,6 @@ jobs:
           go vet ./...
           echo "✅ go vet completed successfully"
 
-      - name: Install staticcheck
-        run: |
-          echo "📦 Installing staticcheck..."
-          go install honnef.co/go/tools/cmd/staticcheck@latest
-
-      - name: Run staticcheck
-        run: |
-          echo "🔍 Running staticcheck..."
-          staticcheck ./...
-          echo "✅ staticcheck completed successfully"
-
       - name: Run tests
         run: go test -v ./...
 

@@ -486,10 +486,6 @@ go fmt ./...
 # Code analysis
 go vet ./...
 
-# Static analysis (optional)
-go install honnef.co/go/tools/cmd/staticcheck@latest
-staticcheck ./...
-
 # Tests
 go test -v ./...
 ```
@@ -502,5 +498,4 @@ GitHub Actions workflows use the following linting tools:
 
 - **go fmt**: Code formatting
 - **go vet**: Code analysis and common mistakes detection
-- **staticcheck**: Advanced static analysis
 - **go test**: Unit tests and coverage
