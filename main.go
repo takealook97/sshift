@@ -2026,7 +2026,7 @@ func connectWithPasswordSSH(server Server) {
 
 	// Request PTY with proper modes
 	modes := ssh.TerminalModes{
-		ssh.ECHO:          1, // Enable echo for normal input
+		ssh.ECHO:          0, // Disable echo for normal input (중복 출력 방지)
 		ssh.ECHOCTL:       0, // Disable control character echo
 		ssh.ECHOKE:        0, // Disable kill character echo
 		ssh.ECHONL:        0, // Disable newline echo
@@ -2034,6 +2034,8 @@ func connectWithPasswordSSH(server Server) {
 		ssh.ISIG:          1, // Enable signals
 		ssh.TTY_OP_ISPEED: TTYISpeed,
 		ssh.TTY_OP_OSPEED: TTYOSpeed,
+		ssh.OPOST:         0, // Disable output processing
+		ssh.ONLCR:         0, // Disable newline conversion
 	}
 
 	if err := session.RequestPty("xterm", TTYRows, TTYCols, modes); err != nil {
@@ -2330,14 +2332,16 @@ func connectWithProgrammaticSSH(fromServer, toServer Server) {
 	session.Stderr = os.Stderr
 	session.Stdin = os.Stdin
 	modes := ssh.TerminalModes{
-		ssh.ECHO:          1,
-		ssh.ECHOCTL:       0,
-		ssh.ECHOKE:        0,
-		ssh.ECHONL:        0,
-		ssh.ICANON:        1,
-		ssh.ISIG:          1,
+		ssh.ECHO:          0, // Disable echo for normal input (중복 출력 방지)
+		ssh.ECHOCTL:       0, // Disable control character echo
+		ssh.ECHOKE:        0, // Disable kill character echo
+		ssh.ECHONL:        0, // Disable newline echo
+		ssh.ICANON:        1, // Enable canonical mode
+		ssh.ISIG:          1, // Enable signals
 		ssh.TTY_OP_ISPEED: TTYISpeed,
 		ssh.TTY_OP_OSPEED: TTYOSpeed,
+		ssh.OPOST:         0, // Disable output processing
+		ssh.ONLCR:         0, // Disable newline conversion
 	}
 
 	if err := session.RequestPty("xterm", TTYRows, TTYCols, modes); err != nil {

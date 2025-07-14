@@ -20,5 +20,5 @@ class Sshift < Formula
   test do
     assert_match "SSHift v#{version}", shell_output("#{bin}/sshift version")
     assert_match "Usage:", shell_output("#{bin}/sshift help")
-  end
+end
 end
