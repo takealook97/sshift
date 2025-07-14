@@ -27,7 +27,7 @@ import (
 )
 
 // Version information (injected during build)
-var Version = "dev"
+var Version = "1.3.6"
 
 // SSHift ASCII Art Logo
 const SSHiftLogo = `
@@ -1807,183 +1807,81 @@ func Connect(server Server) {
 }
 
 func ConnectWithJump(fromServer, toServer Server) {
-	// Check if test mode is enabled
-	if os.Getenv("SSHIFT_TEST_MODE") == "1" {
-		fmt.Printf("🔧 TEST MODE: Would connect through %s@%s to %s@%s\n",
-			fromServer.User, fromServer.Host, toServer.User, toServer.Host)
-		fmt.Printf("   Jump: %s → %s\n", fromServer.Name, toServer.Name)
-		fmt.Printf("   From auth: %s\n", getAuthType(fromServer))
-		fmt.Printf("   To auth: %s\n", getAuthType(toServer))
-		fmt.Println("   Press Enter to continue...")
-		bufio.NewScanner(os.Stdin).Scan()
-
-		return
-	}
-
-	// Check authentication methods
-	fromPassword, err := fromServer.GetDecryptedPassword()
-	if err != nil {
-		fmt.Printf("❌ Failed to decrypt from server password: %v\n", err)
-		fmt.Println("Press Enter to return to menu...")
-		bufio.NewScanner(os.Stdin).Scan()
-
-		return
-	}
-
-	toPassword, err := toServer.GetDecryptedPassword()
-	if err != nil {
-		fmt.Printf("❌ Failed to decrypt to server password: %v\n", err)
-		fmt.Println("Press Enter to return to menu...")
-		bufio.NewScanner(os.Stdin).Scan()
-
-		return
-	}
-
+	fromPassword, _ := fromServer.GetDecryptedPassword()
+	toPassword, _ := toServer.GetDecryptedPassword()
 	fromKeyPath := fromServer.KeyPath
 	toKeyPath := toServer.KeyPath
 
-	// Choose connection method based on authentication type
-	// Prefer ProxyJump for better compatibility when possible
-	// Use programmatic connection only when password authentication is required
+	// pass/pass: double sshpass
+	if fromPassword != "" && toPassword != "" && fromKeyPath == "" && toKeyPath == "" {
+		fmt.Println("🔐 Using double sshpass + ProxyCommand for full password automation")
+		connectWithSSHPass(fromServer, toServer)
+		return
+	}
 
-	// Check if we can use ProxyJump (at least one server uses SSH key)
-	canUseProxyJump := fromKeyPath != "" || toKeyPath != ""
-
-	// Check if password authentication is required
-	needsPassword := fromPassword != "" || toPassword != ""
-
-	if canUseProxyJump && !needsPassword {
-		// Both servers use SSH keys - use ProxyJump (best case)
-		fmt.Println("🔐 Using SSH command with ProxyJump")
-		fmt.Printf("   Jump server auth: %s\n", getAuthType(fromServer))
-		fmt.Printf("   Target server auth: %s\n", getAuthType(toServer))
-
-		// Create temporary SSH config for this connection
-		tempConfig := createTempSSHConfig(fromServer, toServer)
-		if tempConfig != "" {
-			defer os.Remove(tempConfig) // Clean up temp file
-		}
-
-		// Add ProxyJump configuration
+	// pass/pem: jump=pass, target=pem
+	if fromPassword != "" && toKeyPath != "" && fromKeyPath == "" && toPassword == "" {
+		fmt.Println("🔐 Using sshpass + ProxyJump + -i for jump password, target key")
 		proxyJump := fmt.Sprintf("%s@%s", fromServer.User, fromServer.Host)
-
-		// Add target server with validation
-		// Validate user input to prevent command injection
-		if toServer.User == "" || toServer.Host == "" {
-			fmt.Println("❌ Invalid target server configuration")
-			return
+		sshArgs := []string{
+			"-p", fromPassword,
+			"ssh",
+			"-J", proxyJump,
+			"-i", toKeyPath,
+			"-o", "StrictHostKeyChecking=no",
+			fmt.Sprintf("%s@%s", toServer.User, toServer.Host),
 		}
+		cmd := exec.Command("sshpass", sshArgs...)
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		err := cmd.Run()
+		handleSSHError(err, "SSH jump pass/pem")
+		return
+	}
 
-		// Sanitize user and host to prevent command injection
-		targetUser := strings.TrimSpace(toServer.User)
-		targetHost := strings.TrimSpace(toServer.Host)
-
-		// Basic validation - reject potentially dangerous characters
-		if strings.ContainsAny(targetUser+targetHost, ";&|`$(){}[]<>\"'\\") {
-			fmt.Println("❌ Invalid characters in target server configuration")
-			return
+	// pem/pass: jump=pem, target=pass
+	if fromKeyPath != "" && toPassword != "" && fromPassword == "" && toKeyPath == "" {
+		fmt.Println("🔐 Using ProxyCommand with jump key and target password")
+		proxyCmd := fmt.Sprintf("ssh -i %s -W %%h:%%p -o StrictHostKeyChecking=no %s@%s", fromKeyPath, fromServer.User, fromServer.Host)
+		sshArgs := []string{
+			"-p", toPassword,
+			"ssh",
+			"-o", fmt.Sprintf("ProxyCommand=%s", proxyCmd),
+			"-o", "StrictHostKeyChecking=no",
+			fmt.Sprintf("%s@%s", toServer.User, toServer.Host),
 		}
+		cmd := exec.Command("sshpass", sshArgs...)
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		err := cmd.Run()
+		handleSSHError(err, "SSH jump pem/pass")
+		return
+	}
 
-		// Use hardcoded command to prevent command injection
-		sshArgs := []string{"-J", proxyJump, "-o", "StrictHostKeyChecking=no"}
-		if tempConfig != "" {
-			sshArgs = append(sshArgs, "-F", tempConfig)
+	// pem/pem: ProxyCommand with separate keys for jump and target
+	if fromKeyPath != "" && toKeyPath != "" && fromPassword == "" && toPassword == "" {
+		fmt.Println("🔐 Using ProxyCommand with separate keys for jump and target")
+		proxyCmd := fmt.Sprintf("ssh -i %s -W %%h:%%p -o StrictHostKeyChecking=no %s@%s", fromKeyPath, fromServer.User, fromServer.Host)
+		sshArgs := []string{
+			"-o", fmt.Sprintf("ProxyCommand=%s", proxyCmd),
+			"-i", toKeyPath,
+			"-o", "StrictHostKeyChecking=no",
+			fmt.Sprintf("%s@%s", toServer.User, toServer.Host),
 		}
-
-		if fromKeyPath != "" {
-			sshArgs = append(sshArgs, "-i", fromKeyPath)
-		}
-
-		sshArgs = append(sshArgs, fmt.Sprintf("%s@%s", targetUser, targetHost))
-
 		cmd := exec.Command("ssh", sshArgs...)
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
-
-		// Run command - if SSH exits normally, exit the program
-		err = cmd.Run()
-		handleSSHError(err, "SSH jump connection")
-
+		err := cmd.Run()
+		handleSSHError(err, "SSH jump pem/pem")
 		return
 	}
 
-	// Check if we need programmatic connection for password authentication
-	// ProxyJump cannot handle password authentication for target server
-	if toPassword != "" {
-		fmt.Println("🔐 Using programmatic SSH connection (password authentication required)")
-		fmt.Printf("   Jump server auth: %s\n", getAuthType(fromServer))
-		fmt.Printf("   Target server auth: %s\n", getAuthType(toServer))
-		connectWithProgrammaticSSH(fromServer, toServer)
-
-		return
-	}
-
-	// Handle Password → PEM jump (jump server uses password, target uses key)
-	if fromPassword != "" && toKeyPath != "" {
-		fmt.Println("🔐 Using programmatic SSH connection (jump server password auth)")
-		fmt.Printf("   Jump server auth: %s\n", getAuthType(fromServer))
-		fmt.Printf("   Target server auth: %s\n", getAuthType(toServer))
-		connectWithProgrammaticSSH(fromServer, toServer)
-
-		return
-	}
-
-	// Use ProxyJump for SSH key authentication (both servers use keys)
-	fmt.Println("🔐 Using SSH command with ProxyJump")
-	fmt.Printf("   Jump server auth: %s\n", getAuthType(fromServer))
-	fmt.Printf("   Target server auth: %s\n", getAuthType(toServer))
-
-	// Create temporary SSH config for this connection
-	tempConfig := createTempSSHConfig(fromServer, toServer)
-	if tempConfig != "" {
-		defer os.Remove(tempConfig) // Clean up temp file
-	}
-
-	// Add ProxyJump configuration
-	proxyJump := fmt.Sprintf("%s@%s", fromServer.User, fromServer.Host)
-
-	// Add target server with validation
-	// Validate user input to prevent command injection
-	if toServer.User == "" || toServer.Host == "" {
-		fmt.Println("❌ Invalid target server configuration")
-		return
-	}
-
-	// Sanitize user and host to prevent command injection
-	targetUser := strings.TrimSpace(toServer.User)
-	targetHost := strings.TrimSpace(toServer.Host)
-
-	// Basic validation - reject potentially dangerous characters
-	if strings.ContainsAny(targetUser+targetHost, ";&|`$(){}[]<>\"'\\") {
-		fmt.Println("❌ Invalid characters in target server configuration")
-		return
-	}
-
-	// Use hardcoded command to prevent command injection
-	sshArgs := []string{"-J", proxyJump, "-o", "StrictHostKeyChecking=no"}
-	if tempConfig != "" {
-		sshArgs = append(sshArgs, "-F", tempConfig)
-	}
-
-	if fromKeyPath != "" {
-		sshArgs = append(sshArgs, "-i", fromKeyPath)
-	}
-
-	if toKeyPath != "" {
-		sshArgs = append(sshArgs, "-i", toKeyPath)
-	}
-
-	sshArgs = append(sshArgs, fmt.Sprintf("%s@%s", targetUser, targetHost))
-
-	cmd := exec.Command("ssh", sshArgs...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	// Run command - if SSH exits normally, exit the program
-	err = cmd.Run()
-	handleSSHError(err, "SSH jump connection")
+	fmt.Println("❌ Unsupported authentication combination for jump connection")
+	fmt.Println("Press Enter to return to menu...")
+	bufio.NewScanner(os.Stdin).Scan()
 }
 
 // connectWithPasswordSSH connects using Go's SSH package with password authentication
@@ -2019,39 +1917,49 @@ func connectWithPasswordSSH(server Server) {
 	}
 	defer session.Close()
 
-	// Set up terminal
-	session.Stdout = os.Stdout
-	session.Stderr = os.Stderr
-	session.Stdin = os.Stdin
+	// PTY를 요청한 경우에는 표준 입출력 바인딩을 하지 않음 (중복 출력 방지)
+	// session.Stdout = os.Stdout
+	// session.Stderr = os.Stderr
+	// session.Stdin = os.Stdin
 
 	// Request PTY with proper modes
 	modes := ssh.TerminalModes{
-		ssh.ECHO:          0, // Disable echo for normal input (중복 출력 방지)
-		ssh.ECHOCTL:       0, // Disable control character echo
-		ssh.ECHOKE:        0, // Disable kill character echo
-		ssh.ECHONL:        0, // Disable newline echo
-		ssh.ICANON:        1, // Enable canonical mode
-		ssh.ISIG:          1, // Enable signals
+		ssh.ECHO:          0,
+		ssh.ECHOCTL:       0,
+		ssh.ECHOKE:        0,
+		ssh.ECHONL:        0,
+		ssh.ICANON:        1,
+		ssh.ISIG:          1,
 		ssh.TTY_OP_ISPEED: TTYISpeed,
 		ssh.TTY_OP_OSPEED: TTYOSpeed,
-		ssh.OPOST:         0, // Disable output processing
-		ssh.ONLCR:         0, // Disable newline conversion
+		ssh.OPOST:         0,
+		ssh.ONLCR:         0,
+		ssh.OCRNL:         0,
+		ssh.ONOCR:         0,
+		ssh.IXON:          1,
+		ssh.IXOFF:         1,
+		ssh.IXANY:         0,
+		ssh.IMAXBEL:       1,
+		ssh.IUTF8:         1,
 	}
 
 	if err := session.RequestPty("xterm", TTYRows, TTYCols, modes); err != nil {
 		fmt.Printf("❌ Failed to request PTY: %v\n", err)
 		fmt.Println("Press Enter to return to menu...")
 		bufio.NewScanner(os.Stdin).Scan()
-
 		return
 	}
+
+	// 표준 입출력 바인딩 (PTY와 함께 사용)
+	session.Stdout = os.Stdout
+	session.Stderr = os.Stderr
+	session.Stdin = os.Stdin
 
 	// Start shell
 	if err := session.Shell(); err != nil {
 		fmt.Printf("❌ Failed to start shell: %v\n", err)
 		fmt.Println("Press Enter to return to menu...")
 		bufio.NewScanner(os.Stdin).Scan()
-
 		return
 	}
 
@@ -2172,6 +2080,54 @@ func createSSHClient(host, user, password, keyPath string) (*ssh.Client, error) 
 	}
 
 	return client, nil
+}
+
+// connectWithSSHPass connects through jump server using sshpass + ssh command
+func connectWithSSHPass(fromServer, toServer Server) {
+	var err error
+
+	fmt.Println("🔐 Using double sshpass + ProxyCommand for full password automation")
+
+	// Get passwords
+	fromPassword, err := fromServer.GetDecryptedPassword()
+	if err != nil {
+		fmt.Printf("❌ Failed to decrypt from server password: %v\n", err)
+		fmt.Println("Press Enter to return to menu...")
+		bufio.NewScanner(os.Stdin).Scan()
+		return
+	}
+
+	toPassword, err := toServer.GetDecryptedPassword()
+	if err != nil {
+		fmt.Printf("❌ Failed to decrypt to server password: %v\n", err)
+		fmt.Println("Press Enter to return to menu...")
+		bufio.NewScanner(os.Stdin).Scan()
+		return
+	}
+
+	if fromPassword == "" || toPassword == "" {
+		fmt.Println("❌ Both servers need password authentication for this method")
+		fmt.Println("Press Enter to return to menu...")
+		bufio.NewScanner(os.Stdin).Scan()
+		return
+	}
+
+	proxyCmd := fmt.Sprintf("sshpass -p '%s' ssh -W %%h:%%p -o StrictHostKeyChecking=no %s@%s", fromPassword, fromServer.User, fromServer.Host)
+	sshArgs := []string{
+		"-p", toPassword,
+		"ssh",
+		"-o", fmt.Sprintf("ProxyCommand=%s", proxyCmd),
+		"-o", "StrictHostKeyChecking=no",
+		fmt.Sprintf("%s@%s", toServer.User, toServer.Host),
+	}
+
+	cmd := exec.Command("sshpass", sshArgs...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	err = cmd.Run()
+	handleSSHError(err, "SSH jump connection with double sshpass")
 }
 
 // connectWithProgrammaticSSH connects through jump server using Go's SSH package
@@ -2328,20 +2284,28 @@ func connectWithProgrammaticSSH(fromServer, toServer Server) {
 	}
 
 	defer session.Close()
+	// 표준 입출력 바인딩 (PTY와 함께 사용)
 	session.Stdout = os.Stdout
 	session.Stderr = os.Stderr
 	session.Stdin = os.Stdin
 	modes := ssh.TerminalModes{
-		ssh.ECHO:          0, // Disable echo for normal input (중복 출력 방지)
-		ssh.ECHOCTL:       0, // Disable control character echo
-		ssh.ECHOKE:        0, // Disable kill character echo
-		ssh.ECHONL:        0, // Disable newline echo
-		ssh.ICANON:        1, // Enable canonical mode
-		ssh.ISIG:          1, // Enable signals
+		ssh.ECHO:          0,
+		ssh.ECHOCTL:       0,
+		ssh.ECHOKE:        0,
+		ssh.ECHONL:        0,
+		ssh.ICANON:        1,
+		ssh.ISIG:          1,
 		ssh.TTY_OP_ISPEED: TTYISpeed,
 		ssh.TTY_OP_OSPEED: TTYOSpeed,
-		ssh.OPOST:         0, // Disable output processing
-		ssh.ONLCR:         0, // Disable newline conversion
+		ssh.OPOST:         0,
+		ssh.ONLCR:         0,
+		ssh.OCRNL:         0,
+		ssh.ONOCR:         0,
+		ssh.IXON:          1,
+		ssh.IXOFF:         1,
+		ssh.IXANY:         0,
+		ssh.IMAXBEL:       1,
+		ssh.IUTF8:         1,
 	}
 
 	if err := session.RequestPty("xterm", TTYRows, TTYCols, modes); err != nil {
@@ -2549,7 +2513,7 @@ func main() {
 			fmt.Println()
 		case "test":
 			os.Setenv("SSHIFT_TEST_MODE", "1")
-			fmt.Printf("%s\n", colorize(Yellow+Bold, "🔧 Test mode enabled. SSH connections will be simulated."))
+			fmt.Printf("%s\n", colorize(Yellow+Bold, "�� Test mode enabled. SSH connections will be simulated."))
 			RunMenu(sm, jm)
 		case "delete":
 			PromptDeleteServer(sm, jm)
@@ -3469,6 +3433,47 @@ func printHelp() {
 	fmt.Println("  - Passwords are validated for basic security (no null bytes, length limits)")
 	fmt.Println("  - Run 'sshift setup' to configure encryption key")
 	fmt.Println("  - Use 'sshift key' to view encryption information")
+}
+
+// createTempSSHConfigForJump creates a temporary SSH config file for sshpass jump connections
+func createTempSSHConfigForJump(fromServer, toServer Server) string {
+	// Create temporary file with secure permissions
+	tempFile, err := os.CreateTemp("", "sshift_sshpass_config_*.conf")
+	if err != nil {
+		return ""
+	}
+
+	// Set secure file permissions (owner read/write only)
+	if err := os.Chmod(tempFile.Name(), FilePermOwnerOnly); err != nil {
+		os.Remove(tempFile.Name())
+		return ""
+	}
+
+	defer tempFile.Close()
+
+	// Write SSH config content for jump connection
+	configContent := fmt.Sprintf(`Host %s
+  HostName %s
+  User %s
+  StrictHostKeyChecking no
+  UserKnownHostsFile /dev/null
+
+Host %s
+  HostName %s
+  User %s
+  StrictHostKeyChecking no
+  UserKnownHostsFile /dev/null
+`,
+		fromServer.Host, fromServer.Host, fromServer.User,
+		toServer.Host, toServer.Host, toServer.User)
+
+	_, err = tempFile.WriteString(configContent)
+	if err != nil {
+		os.Remove(tempFile.Name())
+		return ""
+	}
+
+	return tempFile.Name()
 }
 
 // createTempSSHConfig creates a temporary SSH config file for jump connections
