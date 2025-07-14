@@ -129,6 +129,7 @@ jobs:
         run: |
           /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
           echo "$HOME/.homebrew/bin" >> $GITHUB_PATH
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
 
       - name: Calculate SHA256
         run: |
@@ -186,6 +187,9 @@ jobs:
 
       - name: Commit and push changes
         run: |
+          # Ensure we're on the main branch
+          git checkout main
+
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add Formula/sshift.rb
