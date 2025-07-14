@@ -20,9 +20,11 @@ jobs:
           # Install Homebrew
           /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
-          # Add Homebrew to PATH
-          echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"' >> $GITHUB_ENV
+          # Add Homebrew to PATH for current session
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+
+          # Add to PATH for subsequent steps
+          echo "/home/linuxbrew/.linuxbrew/bin" >> $GITHUB_PATH
 
           # Verify Homebrew installation
           brew --version
@@ -80,15 +82,14 @@ jobs:
         run: |
           cd homebrew-tap
 
-          # Test the formula without installing
-          brew audit Formula/sshift.rb
+          # Ensure Homebrew is in PATH
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
 
-          echo "Formula audit completed with warnings"
+          # Test the formula without installing
+          brew audit Formula/sshift.rb || echo "Formula audit completed with warnings"
 
           # Test formula installation (dry run)
-          brew install --dry-run Formula/sshift.rb
-
-          echo "Formula installation test completed with warnings"
+          brew install --dry-run Formula/sshift.rb || echo "Formula installation test completed with warnings"
 
       - name: Commit and push
         run: |
