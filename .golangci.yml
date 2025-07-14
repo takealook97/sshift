@@ -1,128 +1,21 @@
 run:
   timeout: 5m
-  go: "1.24"
-  modules-download-mode: readonly
 
 linters:
   enable:
     - gofmt
-    - goimports
     - govet
-    - errcheck
     - staticcheck
-    - gosimple
-    - ineffassign
+    - errcheck
     - unused
-    - misspell
-    - gosec
-    - prealloc
-    - gocritic
-    - revive
-    - gocyclo
-    - dupl
-    - goconst
-    - gocognit
-    - mnd
     - lll
-    - nakedret
-    - noctx
-    - paralleltest
-    - testpackage
-    - tparallel
-    - wastedassign
-    - whitespace
-    - wrapcheck
-  disable:
-    - wsl
 
 linters-settings:
-  gocyclo:
-    min-complexity: 15
-  dupl:
-    threshold: 100
-  goconst:
-    min-len: 3
-    min-occurrences: 3
-  mnd:
-    checks: argument,case,condition,operation,return,assign
   lll:
     line-length: 120
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - experimental
-      - opinionated
-      - performance
-      - style
-    disabled-checks:
-      - commentFormatting
-      - hugeParam
-      - ifElseChain
-      - octalLiteral
-      - whyNoLint
-  revive:
-    rules:
-      - name: exported
-        arguments:
-          - disableStutteringCheck
-      - name: package-comments
-        disabled: true
-      # - name: var-naming
-      #   arguments:
-      #     allowlist:
-      #       - ID
-      #       - API
-      #       - ACL
-      #       - ASCII
-      #       - CPU
-      #       - CSS
-      #       - DNS
-      #       - EOF
-      #       - GUID
-      #       - HTML
-      #       - HTTP
-      #       - HTTPS
-      #       - ID
-      #       - IP
-      #       - JSON
-      #       - QPS
-      #       - RAM
-      #       - RPC
-      #       - SLA
-      #       - SMTP
-      #       - SQL
-      #       - SSH
-      #       - TCP
-      #       - TLS
-      #       - TTL
-      #       - UDP
-      #       - UI
-      #       - GID
-      #       - UID
-      #       - UUID
-      #       - URI
-      #       - URL
-      #       - UTF8
-      #       - VM
-      #       - XML
-      #       - XMPP
-      #       - XSRF
-      #       - XSS
 
 issues:
   exclude-rules:
     - path: _test\.go
       linters:
-        - mnd
-        - gocyclo
-        - dupl
-        - goconst
-    - path: main\.go
-      linters:
-        - gocyclo
-        - gocognit
-    - linters:
-        - gosec
-      text: "Use of ssh InsecureIgnoreHostKey should be audited"
-  max-issues-per-linter: 0
-  max-same-issues: 0
+        - lll

@@ -452,3 +452,49 @@ MIT License - see LICENSE file for details.
 ---
 
 **SSHift** - Making SSH server management simple and secure! 🔐✨
+
+## Recommended Development Environment
+
+- Go: **1.22.x**
+- golangci-lint: **1.55.x** (Does not work with Go 1.24 or higher)
+
+> **Note**: This project uses Go 1.22.x for both local development and CI/CD to ensure compatibility with golangci-lint.
+
+### Example: Setting up the development environment
+
+#### Using asdf
+
+```bash
+asdf install golang 1.22.4
+asdf global golang 1.22.4
+```
+
+#### Using Homebrew
+
+```bash
+brew install go@1.22
+brew unlink go && brew link --force --overwrite go@1.22
+```
+
+#### Install golangci-lint
+
+```bash
+go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.55.2
+```
+
+---
+
+## How to run lint and tests
+
+```bash
+golangci-lint run --timeout=5m --verbose
+go test -v ./...
+```
+
+> ⚠️ golangci-lint does not work with Go 1.24 or higher. Always use Go 1.22.x for linting.
+
+---
+
+## CI/CD
+
+GitHub Actions workflows are configured to use Go 1.22.x for consistent builds and linting across all environments.

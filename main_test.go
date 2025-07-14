@@ -747,7 +747,7 @@ func TestServerManagerEdgeCases(t *testing.T) {
 func TestEncryptionKeyHandling(t *testing.T) {
 	t.Parallel()
 
-	// 항상 고정된 키 사용
+	// Always use a fixed key for testing
 	os.Setenv("SSHIFT_ENCRYPTION_KEY", "test-key-32-bytes-long-for-aes-256")
 
 	password := "testpassword"

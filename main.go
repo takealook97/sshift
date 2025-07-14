@@ -1919,7 +1919,7 @@ func connectWithPasswordSSH(server Server) {
 	}
 	defer session.Close()
 
-	// PTY를 요청한 경우에는 표준 입출력 바인딩을 하지 않음 (중복 출력 방지)
+	// If PTY is requested, do not bind standard input/output (prevents duplicate output)
 	// session.Stdout = os.Stdout
 	// session.Stderr = os.Stderr
 	// session.Stdin = os.Stdin
@@ -1952,7 +1952,7 @@ func connectWithPasswordSSH(server Server) {
 		return
 	}
 
-	// 표준 입출력 바인딩 (PTY와 함께 사용)
+	// Bind standard input/output (used with PTY)
 	session.Stdout = os.Stdout
 	session.Stderr = os.Stderr
 	session.Stdin = os.Stdin
