@@ -2133,8 +2133,6 @@ func connectWithSSHPass(fromServer, toServer Server) {
 	handleSSHError(err, "SSH jump connection with double sshpass")
 }
 
-
-
 // handleSSHSessionEnd handles SSH session end with consistent error reporting
 func handleSSHSessionEnd(session *ssh.Session, err error) {
 	if session != nil {
@@ -3241,10 +3239,6 @@ func printHelp() {
 	fmt.Println("  - Run 'sshift setup' to configure encryption key")
 	fmt.Println("  - Use 'sshift key' to view encryption information")
 }
-
-
-
-
 
 // promptForSSHKey prompts user to select an SSH key and returns the selected path
 func promptForSSHKey() string {
