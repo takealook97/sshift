@@ -62,23 +62,55 @@ jobs:
         run: |
           cd homebrew-tap
 
-          # Check available branches and use the default branch
+          # Show current git status
+          echo "Current git status:"
+          git status
+
           echo "Available branches:"
-          git branch -a
+          git branch -a || echo "No branches found"
 
-          # Get the default branch (usually master or main)
-          DEFAULT_BRANCH=$(git remote show origin | grep 'HEAD branch' | cut -d' ' -f5)
-          echo "Default branch: $DEFAULT_BRANCH"
+          echo "Remote information:"
+          git remote -v || echo "No remotes found"
 
-          # Ensure we're on the default branch
-          git checkout $DEFAULT_BRANCH
+          # Try to get the current branch name
+          CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+          echo "Current branch: $CURRENT_BRANCH"
+
+          # If we're in detached HEAD, try to find the default branch
+          if [ "$CURRENT_BRANCH" = "HEAD" ] || [ "$CURRENT_BRANCH" = "unknown" ]; then
+            echo "Detected detached HEAD, trying to find default branch..."
+            
+            # Try to get default branch from remote
+            DEFAULT_BRANCH=$(git remote show origin 2>/dev/null | grep 'HEAD branch' | cut -d' ' -f5 || echo "")
+            
+            if [ -n "$DEFAULT_BRANCH" ]; then
+              echo "Found default branch: $DEFAULT_BRANCH"
+              git checkout $DEFAULT_BRANCH || {
+                echo "Failed to checkout $DEFAULT_BRANCH, trying master..."
+                git checkout master || {
+                  echo "Failed to checkout master, trying main..."
+                  git checkout main || {
+                    echo "❌ Could not checkout any branch. Available branches:"
+                    git branch -a
+                    exit 1
+                  }
+                }
+              }
+            else
+              echo "Could not determine default branch, trying common names..."
+              git checkout master || git checkout main || {
+                echo "❌ Could not checkout any branch"
+                exit 1
+              }
+            fi
+          fi
 
           # Configure git
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
 
-          # Check current status
-          echo "Current branch: $(git branch --show-current)"
+          # Check final status
+          echo "Final branch: $(git branch --show-current)"
           echo "Git status:"
           git status
 
@@ -90,5 +122,9 @@ jobs:
           else
             echo "Changes detected, committing..."
             git commit -m "Update sshift to ${{ steps.sha256.outputs.version }}"
-            git push origin $DEFAULT_BRANCH
+            
+            # Get current branch for push
+            PUSH_BRANCH=$(git branch --show-current)
+            echo "Pushing to branch: $PUSH_BRANCH"
+            git push origin $PUSH_BRANCH
           fi
