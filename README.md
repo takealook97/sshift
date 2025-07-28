@@ -70,9 +70,15 @@ sudo mv sshift /usr/local/bin/
 
 ### Basic Commands
 
-```bash
+````bash
 # Run interactive menu
 sshift
+
+# Direct connection by server ID or name
+sshift <server_id|name>
+
+# Direct connection with command execution
+sshift <server_id|name> --cmd <command>
 
 # Add new server
 sshift add
@@ -104,6 +110,25 @@ sshift setup        # Setup encryption key
 sshift test         # Run in test mode (simulate connections)
 sshift version      # Show version
 sshift help         # Show help
+
+### Direct Connection Examples
+
+```bash
+# Connect to server by ID
+sshift 1
+
+# Connect to server by name (case-insensitive)
+sshift "Web Server"
+sshift web-server
+
+# Connect and execute a command
+sshift 1 --cmd "ls -la"
+sshift "Database" --cmd "df -h"
+
+# Connect and execute multiple commands
+sshift 2 --cmd "cd /var/log && tail -f access.log"
+````
+
 ```
 
 ### Interactive Menu
@@ -111,17 +136,19 @@ sshift help         # Show help
 When you run `sshift` without arguments, you'll see an interactive menu:
 
 ```
+
 Welcome to SSHift! 🚀
 
- ID | SERVER NAME                    | IP              | USER      | AUTH
-----|--------------------------------|-----------------|-----------|------
- 1) | Web Server                     | 192.168.1.100   | admin     | pass
- 2) | Database                       | 192.168.1.101   | root      | pem
- 3) | Backup Server                  | 192.168.1.102   | user      | Key
- 0) | Exit                           | -               | -         | -
+| ID  | SERVER NAME   | IP            | USER  | AUTH |
+| --- | ------------- | ------------- | ----- | ---- |
+| 1)  | Web Server    | 192.168.1.100 | admin | pass |
+| 2)  | Database      | 192.168.1.101 | root  | pem  |
+| 3)  | Backup Server | 192.168.1.102 | user  | Key  |
+| 0)  | Exit          | -             | -     | -    |
 
-🔍  Select a server to connect:
-```
+🔍 Select a server to connect:
+
+````
 
 **Note**: Servers are automatically sorted by ID for better organization.
 
@@ -152,7 +179,7 @@ Available SSH keys:
 🔍  Select SSH key (1-3): 1
 ✅ Selected: ~/.ssh/id_rsa
 ✅ Added server: Backup Server (ID: 3, backup@192.168.1.102)
-```
+````
 
 **Note**: Auto-increment uses the smallest available ID, not the maximum + 1.
 

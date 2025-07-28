@@ -987,3 +987,59 @@ func TestPromptInput(t *testing.T) {
 		t.Errorf("Expected 'testinput', got '%s'", result)
 	}
 }
+
+func TestFindServerByIDOrName(t *testing.T) {
+	sm := NewServerManager("")
+	sm.Servers = []Server{
+		{ID: 1, Name: "server1", Host: "host1", User: "user1"},
+		{ID: 2, Name: "Server2", Host: "host2", User: "user2"},
+		{ID: 3, Name: "test-server", Host: "host3", User: "user3"},
+	}
+
+	// Test finding by ID
+	server, found := sm.FindServerByIDOrName("1")
+	if !found {
+		t.Error("Should find server by ID")
+	}
+	if server.ID != 1 {
+		t.Error("Wrong server found by ID")
+	}
+
+	// Test finding by name (case-insensitive)
+	server, found = sm.FindServerByIDOrName("server1")
+	if !found {
+		t.Error("Should find server by name")
+	}
+	if server.ID != 1 {
+		t.Error("Wrong server found by name")
+	}
+
+	// Test case-insensitive search
+	server, found = sm.FindServerByIDOrName("server2")
+	if !found {
+		t.Error("Should find server by name (case-insensitive)")
+	}
+	if server.ID != 2 {
+		t.Error("Wrong server found by name (case-insensitive)")
+	}
+
+	// Test finding by name with hyphens
+	server, found = sm.FindServerByIDOrName("test-server")
+	if !found {
+		t.Error("Should find server by name with hyphens")
+	}
+	if server.ID != 3 {
+		t.Error("Wrong server found by name with hyphens")
+	}
+
+	// Test not found
+	_, found = sm.FindServerByIDOrName("nonexistent")
+	if found {
+		t.Error("Should not find nonexistent server")
+	}
+
+	_, found = sm.FindServerByIDOrName("999")
+	if found {
+		t.Error("Should not find server with non-existent ID")
+	}
+}

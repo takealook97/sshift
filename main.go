@@ -158,23 +158,23 @@ func colorize(color, text string) string {
 }
 
 func success(text string) string {
-	return colorize(Green+Bold, "✅  "+text)
+	return colorize(Green+Bold, "✅ "+text)
 }
 
 func errorMsg(text string) string {
-	return colorize(Red+Bold, "❌  "+text)
+	return colorize(Red+Bold, "❌ "+text)
 }
 
 func warning(text string) string {
-	return colorize(Yellow+Bold, "⚠️  "+text)
+	return colorize(Yellow+Bold, "⚠️ "+text)
 }
 
 func info(text string) string {
-	return colorize(Cyan+Bold, "ℹ️  "+text)
+	return colorize(Cyan+Bold, "ℹ️ "+text)
 }
 
 func prompt(text string) string {
-	return colorize(Blue+Bold, "🔍  "+text)
+	return colorize(Blue+Bold, "🔍 "+text)
 }
 
 func serverName(text string) string {
@@ -1717,6 +1717,11 @@ func Connect(server Server) {
 			}
 		}
 
+		// Check if there's a command to execute
+		if execCommand := os.Getenv("SSHIFT_EXEC_COMMAND"); execCommand != "" {
+			fmt.Printf("   Command to execute: %s\n", execCommand)
+		}
+
 		fmt.Println("   Press Enter to continue...")
 		bufio.NewScanner(os.Stdin).Scan()
 
@@ -1742,21 +1747,48 @@ func Connect(server Server) {
 		if sshpassCmd.Run() == nil {
 			// sshpass is available, use it for automatic password input
 			fmt.Println("   Using sshpass for automatic password input")
-			sshArgs := []string{
-				"-p", decryptedPassword,
-				"ssh", "-o", "StrictHostKeyChecking=no",
+
+			// Check if there's a command to execute
+			if execCommand := os.Getenv("SSHIFT_EXEC_COMMAND"); execCommand != "" {
+				// Execute command and then start interactive session
+				// Remove trailing semicolon if present to avoid syntax error
+				cleanCommand := strings.TrimRight(execCommand, ";")
+
+				sshArgs := []string{
+					"-p", decryptedPassword,
+					"ssh", "-t", "-o", "StrictHostKeyChecking=no",
+				}
+				if server.KeyPath != "" {
+					sshArgs = append(sshArgs, "-i", server.KeyPath)
+				}
+				sshArgs = append(sshArgs, fmt.Sprintf("%s@%s", server.User, server.Host), fmt.Sprintf("%s; bash", cleanCommand))
+
+				cmd := exec.Command("sshpass", sshArgs...)
+				cmd.Stdin = os.Stdin
+				cmd.Stdout = os.Stdout
+				cmd.Stderr = os.Stderr
+				err = cmd.Run()
+				handleSSHError(err, "SSH command execution")
+				return
+			} else {
+				// No command, use regular sshpass for interactive session
+				sshArgs := []string{
+					"-p", decryptedPassword,
+					"ssh", "-o", "StrictHostKeyChecking=no",
+				}
+				if server.KeyPath != "" {
+					sshArgs = append(sshArgs, "-i", server.KeyPath)
+				}
+				sshArgs = append(sshArgs, fmt.Sprintf("%s@%s", server.User, server.Host))
+
+				cmd := exec.Command("sshpass", sshArgs...)
+				cmd.Stdin = os.Stdin
+				cmd.Stdout = os.Stdout
+				cmd.Stderr = os.Stderr
+				err = cmd.Run()
+				handleSSHError(err, "SSH connection")
+				return
 			}
-			if server.KeyPath != "" {
-				sshArgs = append(sshArgs, "-i", server.KeyPath)
-			}
-			sshArgs = append(sshArgs, fmt.Sprintf("%s@%s", server.User, server.Host))
-			cmd := exec.Command("sshpass", sshArgs...)
-			cmd.Stdin = os.Stdin
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
-			err = cmd.Run()
-			handleSSHError(err, "SSH connection")
-			return
 		} else {
 			// sshpass not available, use expect-like behavior with Go's SSH package
 			fmt.Println("   sshpass not available, using interactive password input")
@@ -1770,40 +1802,11 @@ func Connect(server Server) {
 	} else {
 		// Use SSH key authentication
 		fmt.Printf("🔐 Using SSH key authentication with key: %s\n", server.KeyPath)
-	}
 
-	// Validate user input to prevent command injection
-	if server.User == "" || server.Host == "" {
-		fmt.Println("❌ Invalid server configuration")
+		// Use Go's SSH package for key authentication (supports command execution + interactive session)
+		connectWithSSHKey(server)
 		return
 	}
-
-	// Sanitize user and host to prevent command injection
-	user := strings.TrimSpace(server.User)
-	host := strings.TrimSpace(server.Host)
-
-	// Basic validation - reject potentially dangerous characters
-	if strings.ContainsAny(user+host, ";&|`$(){}[]<>\"'\\") {
-		fmt.Println("❌ Invalid characters in server configuration")
-		return
-	}
-
-	// Use hardcoded command to prevent command injection
-	sshArgs := []string{"-o", "StrictHostKeyChecking=no"}
-	// Add key path if specified
-	if server.KeyPath != "" {
-		sshArgs = append(sshArgs, "-i", server.KeyPath)
-	}
-
-	sshArgs = append(sshArgs, fmt.Sprintf("%s@%s", user, host))
-	cmd := exec.Command("ssh", sshArgs...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	// Run command - if SSH exits normally, exit the program
-	err = cmd.Run()
-	handleSSHError(err, "SSH connection")
 }
 
 func ConnectWithJump(fromServer, toServer Server) {
@@ -1811,6 +1814,9 @@ func ConnectWithJump(fromServer, toServer Server) {
 	toPassword, _ := toServer.GetDecryptedPassword()
 	fromKeyPath := fromServer.KeyPath
 	toKeyPath := toServer.KeyPath
+
+	// Check if there's a command to execute
+	execCommand := os.Getenv("SSHIFT_EXEC_COMMAND")
 
 	// pass/pass: double sshpass
 	if fromPassword != "" && toPassword != "" && fromKeyPath == "" && toKeyPath == "" {
@@ -1830,6 +1836,12 @@ func ConnectWithJump(fromServer, toServer Server) {
 			"-i", toKeyPath,
 			"-o", "StrictHostKeyChecking=no",
 			fmt.Sprintf("%s@%s", toServer.User, toServer.Host),
+		}
+		if execCommand != "" {
+			// Execute command and then start interactive session
+			// Remove trailing semicolon if present to avoid syntax error
+			cleanCommand := strings.TrimRight(execCommand, ";")
+			sshArgs = append(sshArgs, "-t", fmt.Sprintf("%s; bash", cleanCommand))
 		}
 		cmd := exec.Command("sshpass", sshArgs...)
 		cmd.Stdin = os.Stdin
@@ -1852,6 +1864,12 @@ func ConnectWithJump(fromServer, toServer Server) {
 			"-o", "StrictHostKeyChecking=no",
 			fmt.Sprintf("%s@%s", toServer.User, toServer.Host),
 		}
+		if execCommand != "" {
+			// Execute command and then start interactive session
+			// Remove trailing semicolon if present to avoid syntax error
+			cleanCommand := strings.TrimRight(execCommand, ";")
+			sshArgs = append(sshArgs, "-t", fmt.Sprintf("%s; bash", cleanCommand))
+		}
 		cmd := exec.Command("sshpass", sshArgs...)
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
@@ -1867,10 +1885,17 @@ func ConnectWithJump(fromServer, toServer Server) {
 		proxyCmd := fmt.Sprintf("ssh -i %s -W %%h:%%p -o StrictHostKeyChecking=no %s@%s",
 			fromKeyPath, fromServer.User, fromServer.Host)
 		sshArgs := []string{
+			"-t", // Force pseudo-terminal allocation
 			"-o", fmt.Sprintf("ProxyCommand=%s", proxyCmd),
 			"-i", toKeyPath,
 			"-o", "StrictHostKeyChecking=no",
 			fmt.Sprintf("%s@%s", toServer.User, toServer.Host),
+		}
+		if execCommand != "" {
+			// Execute command and then start interactive session
+			// Remove trailing semicolon if present to avoid syntax error
+			cleanCommand := strings.TrimRight(execCommand, ";")
+			sshArgs = append(sshArgs, "-t", fmt.Sprintf("%s; bash", cleanCommand))
 		}
 		cmd := exec.Command("ssh", sshArgs...)
 		cmd.Stdin = os.Stdin
@@ -1949,6 +1974,76 @@ func connectWithPasswordSSH(server Server) {
 		fmt.Printf("❌ Failed to request PTY: %v\n", err)
 		fmt.Println("Press Enter to return to menu...")
 		bufio.NewScanner(os.Stdin).Scan()
+		return
+	}
+
+	// Check if there's a command to execute
+	if execCommand := os.Getenv("SSHIFT_EXEC_COMMAND"); execCommand != "" {
+		// Execute command first, then start interactive session
+		session.Stdout = os.Stdout
+		session.Stderr = os.Stderr
+
+		if err := session.Run(execCommand); err != nil {
+			fmt.Printf("❌ Failed to execute command: %v\n", err)
+			fmt.Println("Press Enter to return to menu...")
+			bufio.NewScanner(os.Stdin).Scan()
+			return
+		}
+
+		// Command executed successfully, now start interactive session
+		fmt.Printf("\n%s\n", colorize(Cyan+Bold, "🔗 Command executed. Starting interactive session..."))
+
+		// Clear the environment variable to prevent re-execution
+		os.Unsetenv("SSHIFT_EXEC_COMMAND")
+
+		// Create a new session for interactive use
+		interactiveSession, err := client.NewSession()
+		if err != nil {
+			fmt.Printf("❌ Failed to create interactive session: %v\n", err)
+			return
+		}
+		defer interactiveSession.Close()
+
+		// Request PTY for interactive session
+		modes := ssh.TerminalModes{
+			ssh.ECHO:          0,
+			ssh.ECHOCTL:       0,
+			ssh.ECHOKE:        0,
+			ssh.ECHONL:        0,
+			ssh.ICANON:        1,
+			ssh.ISIG:          1,
+			ssh.TTY_OP_ISPEED: TTYISpeed,
+			ssh.TTY_OP_OSPEED: TTYOSpeed,
+			ssh.OPOST:         0,
+			ssh.ONLCR:         0,
+			ssh.OCRNL:         0,
+			ssh.ONOCR:         0,
+			ssh.IXON:          1,
+			ssh.IXOFF:         1,
+			ssh.IXANY:         0,
+			ssh.IMAXBEL:       1,
+			ssh.IUTF8:         1,
+		}
+
+		if err := interactiveSession.RequestPty("xterm", TTYRows, TTYCols, modes); err != nil {
+			fmt.Printf("❌ Failed to request PTY: %v\n", err)
+			return
+		}
+
+		// Bind standard input/output for interactive session
+		interactiveSession.Stdout = os.Stdout
+		interactiveSession.Stderr = os.Stderr
+		interactiveSession.Stdin = os.Stdin
+
+		// Start interactive shell
+		if err := interactiveSession.Shell(); err != nil {
+			fmt.Printf("❌ Failed to start shell: %v\n", err)
+			return
+		}
+
+		// Wait for interactive session to end
+		err = interactiveSession.Wait()
+		handleSSHSessionEnd(interactiveSession, err)
 		return
 	}
 
@@ -2114,6 +2209,9 @@ func connectWithSSHPass(fromServer, toServer Server) {
 		return
 	}
 
+	// Check if there's a command to execute
+	execCommand := os.Getenv("SSHIFT_EXEC_COMMAND")
+
 	proxyCmd := fmt.Sprintf("sshpass -p '%s' ssh -W %%h:%%p -o StrictHostKeyChecking=no %s@%s",
 		fromPassword, fromServer.User, fromServer.Host)
 	sshArgs := []string{
@@ -2124,6 +2222,13 @@ func connectWithSSHPass(fromServer, toServer Server) {
 		fmt.Sprintf("%s@%s", toServer.User, toServer.Host),
 	}
 
+	if execCommand != "" {
+		// Execute command and then start interactive session
+		// Remove trailing semicolon if present to avoid syntax error
+		cleanCommand := strings.TrimRight(execCommand, ";")
+		sshArgs = append(sshArgs, "-t", fmt.Sprintf("%s; bash", cleanCommand))
+	}
+
 	cmd := exec.Command("sshpass", sshArgs...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -2131,6 +2236,182 @@ func connectWithSSHPass(fromServer, toServer Server) {
 
 	err = cmd.Run()
 	handleSSHError(err, "SSH jump connection with double sshpass")
+}
+
+// connectWithJumpAndPassword connects through a jump server using Go's SSH package with password authentication
+func connectWithJumpAndPassword(fromServer, toServer Server) {
+	// Get passwords
+	fromPassword, err := fromServer.GetDecryptedPassword()
+	if err != nil {
+		fmt.Printf("❌ Failed to decrypt from server password: %v\n", err)
+		return
+	}
+
+	toPassword, err := toServer.GetDecryptedPassword()
+	if err != nil {
+		fmt.Printf("❌ Failed to decrypt to server password: %v\n", err)
+		return
+	}
+
+	// First, connect to the jump server
+	jumpClient, err := createSSHClient(fromServer.Host, fromServer.User, fromPassword, "")
+	if err != nil {
+		fmt.Printf("❌ Failed to connect to jump server: %v\n", err)
+		return
+	}
+	defer jumpClient.Close()
+
+	// Create a session on the jump server to establish a tunnel
+	jumpSession, err := jumpClient.NewSession()
+	if err != nil {
+		fmt.Printf("❌ Failed to create jump session: %v\n", err)
+		return
+	}
+	defer jumpSession.Close()
+
+	// Request a direct TCP connection to the target server
+	if err := jumpSession.RequestPty("xterm", 80, 40, ssh.TerminalModes{}); err != nil {
+		fmt.Printf("❌ Failed to request PTY for jump: %v\n", err)
+		return
+	}
+
+	// Set up the tunnel
+	if err := jumpSession.Shell(); err != nil {
+		fmt.Printf("❌ Failed to start shell on jump server: %v\n", err)
+		return
+	}
+
+	// Now connect to the target server through the tunnel
+	targetClient, err := createSSHClient(toServer.Host, toServer.User, toPassword, "")
+	if err != nil {
+		fmt.Printf("❌ Failed to connect to target server: %v\n", err)
+		return
+	}
+	defer targetClient.Close()
+
+	// Check if there's a command to execute
+	if execCommand := os.Getenv("SSHIFT_EXEC_COMMAND"); execCommand != "" {
+		// Execute command first
+		session, err := targetClient.NewSession()
+		if err != nil {
+			fmt.Printf("❌ Failed to create target session: %v\n", err)
+			return
+		}
+		defer session.Close()
+
+		session.Stdout = os.Stdout
+		session.Stderr = os.Stderr
+
+		if err := session.Run(execCommand); err != nil {
+			fmt.Printf("❌ Failed to execute command: %v\n", err)
+			return
+		}
+
+		// Command executed successfully, now start interactive session
+		fmt.Printf("\n%s\n", colorize(Cyan+Bold, "🔗 Command executed. Starting interactive session..."))
+
+		// Clear the environment variable to prevent re-execution
+		os.Unsetenv("SSHIFT_EXEC_COMMAND")
+
+		// Create a new session for interactive use
+		interactiveSession, err := targetClient.NewSession()
+		if err != nil {
+			fmt.Printf("❌ Failed to create interactive session: %v\n", err)
+			return
+		}
+		defer interactiveSession.Close()
+
+		// Request PTY for interactive session
+		modes := ssh.TerminalModes{
+			ssh.ECHO:          0,
+			ssh.ECHOCTL:       0,
+			ssh.ECHOKE:        0,
+			ssh.ECHONL:        0,
+			ssh.ICANON:        1,
+			ssh.ISIG:          1,
+			ssh.TTY_OP_ISPEED: TTYISpeed,
+			ssh.TTY_OP_OSPEED: TTYOSpeed,
+			ssh.OPOST:         0,
+			ssh.ONLCR:         0,
+			ssh.OCRNL:         0,
+			ssh.ONOCR:         0,
+			ssh.IXON:          1,
+			ssh.IXOFF:         1,
+			ssh.IXANY:         0,
+			ssh.IMAXBEL:       1,
+			ssh.IUTF8:         1,
+		}
+
+		if err := interactiveSession.RequestPty("xterm", TTYRows, TTYCols, modes); err != nil {
+			fmt.Printf("❌ Failed to request PTY: %v\n", err)
+			return
+		}
+
+		// Bind standard input/output for interactive session
+		interactiveSession.Stdout = os.Stdout
+		interactiveSession.Stderr = os.Stderr
+		interactiveSession.Stdin = os.Stdin
+
+		// Start interactive shell
+		if err := interactiveSession.Shell(); err != nil {
+			fmt.Printf("❌ Failed to start shell: %v\n", err)
+			return
+		}
+
+		// Wait for interactive session to end
+		err = interactiveSession.Wait()
+		handleSSHSessionEnd(interactiveSession, err)
+		return
+	}
+
+	// No command to execute, just start interactive session
+	session, err := targetClient.NewSession()
+	if err != nil {
+		fmt.Printf("❌ Failed to create session: %v\n", err)
+		return
+	}
+	defer session.Close()
+
+	// Request PTY for interactive session
+	modes := ssh.TerminalModes{
+		ssh.ECHO:          0,
+		ssh.ECHOCTL:       0,
+		ssh.ECHOKE:        0,
+		ssh.ECHONL:        0,
+		ssh.ICANON:        1,
+		ssh.ISIG:          1,
+		ssh.TTY_OP_ISPEED: TTYISpeed,
+		ssh.TTY_OP_OSPEED: TTYOSpeed,
+		ssh.OPOST:         0,
+		ssh.ONLCR:         0,
+		ssh.OCRNL:         0,
+		ssh.ONOCR:         0,
+		ssh.IXON:          1,
+		ssh.IXOFF:         1,
+		ssh.IXANY:         0,
+		ssh.IMAXBEL:       1,
+		ssh.IUTF8:         1,
+	}
+
+	if err := session.RequestPty("xterm", TTYRows, TTYCols, modes); err != nil {
+		fmt.Printf("❌ Failed to request PTY: %v\n", err)
+		return
+	}
+
+	// Bind standard input/output
+	session.Stdout = os.Stdout
+	session.Stderr = os.Stderr
+	session.Stdin = os.Stdin
+
+	// Start interactive shell
+	if err := session.Shell(); err != nil {
+		fmt.Printf("❌ Failed to start shell: %v\n", err)
+		return
+	}
+
+	// Wait for session to end
+	err = session.Wait()
+	handleSSHSessionEnd(session, err)
 }
 
 // handleSSHSessionEnd handles SSH session end with consistent error reporting
@@ -2303,6 +2584,26 @@ func main() {
 	jm := NewJumpManager(baseDir)
 
 	if len(os.Args) > 1 {
+		// Check if first argument is a server identifier (not a command)
+		if os.Args[1] != "add" && os.Args[1] != "jump" && os.Args[1] != "version" &&
+			os.Args[1] != "-v" && os.Args[1] != "--version" && os.Args[1] != "help" &&
+			os.Args[1] != "-h" && os.Args[1] != "--help" && os.Args[1] != "list" &&
+			os.Args[1] != "test" && os.Args[1] != "delete" && os.Args[1] != "sort" &&
+			os.Args[1] != "edit" && os.Args[1] != "export" && os.Args[1] != "import" &&
+			os.Args[1] != "setup" && os.Args[1] != "key" {
+
+			// Check if this is a direct connection with command
+			if len(os.Args) > 3 && os.Args[2] == "--cmd" {
+				command := strings.Join(os.Args[3:], " ")
+				ConnectToServerWithCommand(sm, jm, os.Args[1], command)
+				return
+			} else {
+				// Direct connection without command
+				ConnectToServer(sm, jm, os.Args[1])
+				return
+			}
+		}
+
 		switch os.Args[1] {
 		case "add":
 			PromptAddServer(sm)
@@ -2318,7 +2619,7 @@ func main() {
 			fmt.Println()
 		case "test":
 			os.Setenv("SSHIFT_TEST_MODE", "1")
-			fmt.Printf("%s\n", colorize(Yellow+Bold, "�� Test mode enabled. SSH connections will be simulated."))
+			fmt.Printf("%s\n", colorize(Yellow+Bold, "🔧 Test mode enabled. SSH connections will be simulated."))
 			RunMenu(sm, jm)
 		case "delete":
 			PromptDeleteServer(sm, jm)
@@ -3208,6 +3509,8 @@ func printHelp() {
 	fmt.Println()
 	fmt.Println("Usage:")
 	fmt.Println("  sshift                    - Run interactive menu")
+	fmt.Println("  sshift <server_id|name>   - Connect to server directly")
+	fmt.Println("  sshift <server_id|name> --cmd <command> - Connect and execute command")
 	fmt.Println("  sshift add                - Add new server")
 	fmt.Println("  sshift list               - List all servers")
 	fmt.Println("  sshift delete             - Delete server")
@@ -3321,4 +3624,253 @@ func handleSSHError(err error, connectionType string) {
 		// SSH exited normally (no error), exit the program
 		os.Exit(0)
 	}
+}
+
+// FindServerByIDOrName finds a server by ID or name
+func (sm *ServerManager) FindServerByIDOrName(identifier string) (Server, bool) {
+	// Try to parse as ID first
+	if id, err := strconv.Atoi(identifier); err == nil {
+		return sm.GetByID(id)
+	}
+
+	// Try to find by name (case-insensitive)
+	for _, server := range sm.Servers {
+		if strings.EqualFold(server.Name, identifier) {
+			return server, true
+		}
+	}
+
+	return Server{}, false
+}
+
+// ConnectToServer connects to a server by ID or name
+func ConnectToServer(sm *ServerManager, jm *JumpManager, identifier string) {
+	server, found := sm.FindServerByIDOrName(identifier)
+	if !found {
+		fmt.Printf("%s: Server '%s' not found\n", errorMsg("Error"), identifier)
+		fmt.Printf("Available servers:\n")
+		PrintServerList(sm)
+		return
+	}
+
+	// Check if this server requires a jump connection
+	fromID, hasJump := jm.GetJumpFrom(server.ID)
+	if hasJump {
+		// This server requires a jump connection
+		fromServer, found := sm.GetByID(fromID)
+		if !found {
+			fmt.Printf("%s: Jump server (ID: %d) not found\n", errorMsg("Error"), fromID)
+			return
+		}
+
+		fmt.Printf("%s %s (%s@%s) %s %s (%s@%s)\n",
+			colorize(Cyan+Bold, "🔗 Connecting to"),
+			serverName(server.Name),
+			server.User,
+			server.Host,
+			colorize(Blue+Bold, "via"),
+			serverName(fromServer.Name),
+			fromServer.User,
+			fromServer.Host)
+
+		ConnectWithJump(fromServer, server)
+		return
+	}
+
+	fmt.Printf("%s %s (%s@%s)\n",
+		colorize(Cyan+Bold, "🔗 Connecting to"),
+		serverName(server.Name),
+		server.User,
+		server.Host)
+
+	Connect(server)
+}
+
+// ConnectToServerWithCommand connects to a server and executes a command
+func ConnectToServerWithCommand(sm *ServerManager, jm *JumpManager, identifier string, command string) {
+	server, found := sm.FindServerByIDOrName(identifier)
+	if !found {
+		fmt.Printf("%s: Server '%s' not found\n", errorMsg("Error"), identifier)
+		fmt.Printf("Available servers:\n")
+		PrintServerList(sm)
+		return
+	}
+
+	// Check if this server requires a jump connection
+	fromID, hasJump := jm.GetJumpFrom(server.ID)
+	if hasJump {
+		// This server requires a jump connection
+		fromServer, found := sm.GetByID(fromID)
+		if !found {
+			fmt.Printf("%s: Jump server (ID: %d) not found\n", errorMsg("Error"), fromID)
+			return
+		}
+
+		fmt.Printf("%s %s (%s@%s) %s '%s' %s %s (%s@%s)\n",
+			colorize(Cyan+Bold, "🔗 Connecting to"),
+			serverName(server.Name),
+			server.User,
+			server.Host,
+			colorize(Yellow+Bold, "with command"),
+			command,
+			colorize(Blue+Bold, "via"),
+			serverName(fromServer.Name),
+			fromServer.User,
+			fromServer.Host)
+
+		// Set environment variable for the command to execute
+		os.Setenv("SSHIFT_EXEC_COMMAND", command)
+		ConnectWithJump(fromServer, server)
+		return
+	}
+
+	fmt.Printf("%s %s (%s@%s) %s '%s'\n",
+		colorize(Cyan+Bold, "🔗 Connecting to"),
+		serverName(server.Name),
+		server.User,
+		server.Host,
+		colorize(Yellow+Bold, "with command"),
+		command)
+
+	// Set environment variable for the command to execute
+	os.Setenv("SSHIFT_EXEC_COMMAND", command)
+	Connect(server)
+}
+
+// connectWithSSHKey connects using Go's SSH package with key authentication
+func connectWithSSHKey(server Server) {
+	// Create SSH client with key authentication
+	client, err := createSSHClient(server.Host, server.User, "", server.KeyPath)
+	if err != nil {
+		fmt.Printf("❌ Failed to connect: %v\n", err)
+		fmt.Println("Press Enter to return to menu...")
+		bufio.NewScanner(os.Stdin).Scan()
+		return
+	}
+	defer client.Close()
+
+	// Request interactive session
+	session, err := client.NewSession()
+	if err != nil {
+		fmt.Printf("❌ Failed to create session: %v\n", err)
+		fmt.Println("Press Enter to return to menu...")
+		bufio.NewScanner(os.Stdin).Scan()
+		return
+	}
+	defer session.Close()
+
+	// Check if there's a command to execute
+	if execCommand := os.Getenv("SSHIFT_EXEC_COMMAND"); execCommand != "" {
+		// Execute command first, then start interactive session
+		session.Stdout = os.Stdout
+		session.Stderr = os.Stderr
+
+		if err := session.Run(execCommand); err != nil {
+			fmt.Printf("❌ Failed to execute command: %v\n", err)
+			fmt.Println("Press Enter to return to menu...")
+			bufio.NewScanner(os.Stdin).Scan()
+			return
+		}
+
+		// Command executed successfully, now start interactive session
+		fmt.Printf("\n%s\n", colorize(Cyan+Bold, "🔗 Command executed. Starting interactive session..."))
+
+		// Clear the environment variable to prevent re-execution
+		os.Unsetenv("SSHIFT_EXEC_COMMAND")
+
+		// Create a new session for interactive use
+		interactiveSession, err := client.NewSession()
+		if err != nil {
+			fmt.Printf("❌ Failed to create interactive session: %v\n", err)
+			return
+		}
+		defer interactiveSession.Close()
+
+		// Request PTY for interactive session
+		modes := ssh.TerminalModes{
+			ssh.ECHO:          0,
+			ssh.ECHOCTL:       0,
+			ssh.ECHOKE:        0,
+			ssh.ECHONL:        0,
+			ssh.ICANON:        1,
+			ssh.ISIG:          1,
+			ssh.TTY_OP_ISPEED: TTYISpeed,
+			ssh.TTY_OP_OSPEED: TTYOSpeed,
+			ssh.OPOST:         0,
+			ssh.ONLCR:         0,
+			ssh.OCRNL:         0,
+			ssh.ONOCR:         0,
+			ssh.IXON:          1,
+			ssh.IXOFF:         1,
+			ssh.IXANY:         0,
+			ssh.IMAXBEL:       1,
+			ssh.IUTF8:         1,
+		}
+
+		if err := interactiveSession.RequestPty("xterm", TTYRows, TTYCols, modes); err != nil {
+			fmt.Printf("❌ Failed to request PTY: %v\n", err)
+			return
+		}
+
+		// Bind standard input/output for interactive session
+		interactiveSession.Stdout = os.Stdout
+		interactiveSession.Stderr = os.Stderr
+		interactiveSession.Stdin = os.Stdin
+
+		// Start interactive shell
+		if err := interactiveSession.Shell(); err != nil {
+			fmt.Printf("❌ Failed to start shell: %v\n", err)
+			return
+		}
+
+		// Wait for interactive session to end
+		err = interactiveSession.Wait()
+		handleSSHSessionEnd(interactiveSession, err)
+		return
+	}
+
+	// Request PTY with proper modes
+	modes := ssh.TerminalModes{
+		ssh.ECHO:          0,
+		ssh.ECHOCTL:       0,
+		ssh.ECHOKE:        0,
+		ssh.ECHONL:        0,
+		ssh.ICANON:        1,
+		ssh.ISIG:          1,
+		ssh.TTY_OP_ISPEED: TTYISpeed,
+		ssh.TTY_OP_OSPEED: TTYOSpeed,
+		ssh.OPOST:         0,
+		ssh.ONLCR:         0,
+		ssh.OCRNL:         0,
+		ssh.ONOCR:         0,
+		ssh.IXON:          1,
+		ssh.IXOFF:         1,
+		ssh.IXANY:         0,
+		ssh.IMAXBEL:       1,
+		ssh.IUTF8:         1,
+	}
+
+	if err := session.RequestPty("xterm", TTYRows, TTYCols, modes); err != nil {
+		fmt.Printf("❌ Failed to request PTY: %v\n", err)
+		fmt.Println("Press Enter to return to menu...")
+		bufio.NewScanner(os.Stdin).Scan()
+		return
+	}
+
+	// Bind standard input/output (used with PTY)
+	session.Stdout = os.Stdout
+	session.Stderr = os.Stderr
+	session.Stdin = os.Stdin
+
+	// Start shell
+	if err := session.Shell(); err != nil {
+		fmt.Printf("❌ Failed to start shell: %v\n", err)
+		fmt.Println("Press Enter to return to menu...")
+		bufio.NewScanner(os.Stdin).Scan()
+		return
+	}
+
+	// Wait for session to end - if session ends normally, exit the program
+	err = session.Wait()
+	handleSSHSessionEnd(session, err)
 }
