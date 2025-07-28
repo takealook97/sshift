@@ -73,7 +73,8 @@ jobs:
             exit 1
           fi
 
-          # Update SHA256 in Formula/sshift.rb (version is auto-extracted from URL)
+          # Update URL and SHA256 in Formula/sshift.rb
+          sed -i "s|url \".*\"|url \"https://github.com/takealook97/sshift/archive/refs/tags/${VERSION}.tar.gz\"|" Formula/sshift.rb
           sed -i "s/sha256 \".*\"/sha256 \"${{ steps.sha256.outputs.sha256 }}\"/" Formula/sshift.rb
 
           # Ensure sshpass dependency is included
