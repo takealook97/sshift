@@ -3737,140 +3737,29 @@ func ConnectToServerWithCommand(sm *ServerManager, jm *JumpManager, identifier s
 	Connect(server)
 }
 
-// connectWithSSHKey connects using Go's SSH package with key authentication
+// connectWithSSHKey connects using system ssh command with key authentication
 func connectWithSSHKey(server Server) {
-	// Create SSH client with key authentication
-	client, err := createSSHClient(server.Host, server.User, "", server.KeyPath)
-	if err != nil {
-		fmt.Printf("❌ Failed to connect: %v\n", err)
-		fmt.Println("Press Enter to return to menu...")
-		bufio.NewScanner(os.Stdin).Scan()
-		return
-	}
-	defer client.Close()
-
-	// Request interactive session
-	session, err := client.NewSession()
-	if err != nil {
-		fmt.Printf("❌ Failed to create session: %v\n", err)
-		fmt.Println("Press Enter to return to menu...")
-		bufio.NewScanner(os.Stdin).Scan()
-		return
-	}
-	defer session.Close()
-
 	// Check if there's a command to execute
-	if execCommand := os.Getenv("SSHIFT_EXEC_COMMAND"); execCommand != "" {
-		// Execute command first, then start interactive session
-		session.Stdout = os.Stdout
-		session.Stderr = os.Stderr
+	execCommand := os.Getenv("SSHIFT_EXEC_COMMAND")
 
-		if err := session.Run(execCommand); err != nil {
-			fmt.Printf("❌ Failed to execute command: %v\n", err)
-			fmt.Println("Press Enter to return to menu...")
-			bufio.NewScanner(os.Stdin).Scan()
-			return
-		}
-
-		// Command executed successfully, now start interactive session
-		fmt.Printf("\n%s\n", colorize(Cyan+Bold, "🔗 Command executed. Starting interactive session..."))
-
-		// Clear the environment variable to prevent re-execution
-		os.Unsetenv("SSHIFT_EXEC_COMMAND")
-
-		// Create a new session for interactive use
-		interactiveSession, err := client.NewSession()
-		if err != nil {
-			fmt.Printf("❌ Failed to create interactive session: %v\n", err)
-			return
-		}
-		defer interactiveSession.Close()
-
-		// Request PTY for interactive session
-		modes := ssh.TerminalModes{
-			ssh.ECHO:          0,
-			ssh.ECHOCTL:       0,
-			ssh.ECHOKE:        0,
-			ssh.ECHONL:        0,
-			ssh.ICANON:        1,
-			ssh.ISIG:          1,
-			ssh.TTY_OP_ISPEED: TTYISpeed,
-			ssh.TTY_OP_OSPEED: TTYOSpeed,
-			ssh.OPOST:         0,
-			ssh.ONLCR:         0,
-			ssh.OCRNL:         0,
-			ssh.ONOCR:         0,
-			ssh.IXON:          1,
-			ssh.IXOFF:         1,
-			ssh.IXANY:         0,
-			ssh.IMAXBEL:       1,
-			ssh.IUTF8:         1,
-		}
-
-		if err := interactiveSession.RequestPty("xterm", TTYRows, TTYCols, modes); err != nil {
-			fmt.Printf("❌ Failed to request PTY: %v\n", err)
-			return
-		}
-
-		// Bind standard input/output for interactive session
-		interactiveSession.Stdout = os.Stdout
-		interactiveSession.Stderr = os.Stderr
-		interactiveSession.Stdin = os.Stdin
-
-		// Start interactive shell
-		if err := interactiveSession.Shell(); err != nil {
-			fmt.Printf("❌ Failed to start shell: %v\n", err)
-			return
-		}
-
-		// Wait for interactive session to end
-		err = interactiveSession.Wait()
-		handleSSHSessionEnd(interactiveSession, err)
-		return
+	sshArgs := []string{
+		"-t", // Force pseudo-terminal allocation
+		"-i", server.KeyPath,
+		"-o", "StrictHostKeyChecking=no",
+		fmt.Sprintf("%s@%s", server.User, server.Host),
 	}
 
-	// Request PTY with proper modes
-	modes := ssh.TerminalModes{
-		ssh.ECHO:          0,
-		ssh.ECHOCTL:       0,
-		ssh.ECHOKE:        0,
-		ssh.ECHONL:        0,
-		ssh.ICANON:        1,
-		ssh.ISIG:          1,
-		ssh.TTY_OP_ISPEED: TTYISpeed,
-		ssh.TTY_OP_OSPEED: TTYOSpeed,
-		ssh.OPOST:         0,
-		ssh.ONLCR:         0,
-		ssh.OCRNL:         0,
-		ssh.ONOCR:         0,
-		ssh.IXON:          1,
-		ssh.IXOFF:         1,
-		ssh.IXANY:         0,
-		ssh.IMAXBEL:       1,
-		ssh.IUTF8:         1,
+	if execCommand != "" {
+		// Execute command and then start interactive session
+		// Remove trailing semicolon if present to avoid syntax error
+		cleanCommand := strings.TrimRight(execCommand, ";")
+		sshArgs = append(sshArgs, "-t", fmt.Sprintf("%s; bash", cleanCommand))
 	}
 
-	if err := session.RequestPty("xterm", TTYRows, TTYCols, modes); err != nil {
-		fmt.Printf("❌ Failed to request PTY: %v\n", err)
-		fmt.Println("Press Enter to return to menu...")
-		bufio.NewScanner(os.Stdin).Scan()
-		return
-	}
-
-	// If PTY is requested, do not bind standard input/output (prevents duplicate output)
-	// session.Stdout = os.Stdout
-	// session.Stderr = os.Stderr
-	// session.Stdin = os.Stdin
-
-	// Start shell
-	if err := session.Shell(); err != nil {
-		fmt.Printf("❌ Failed to start shell: %v\n", err)
-		fmt.Println("Press Enter to return to menu...")
-		bufio.NewScanner(os.Stdin).Scan()
-		return
-	}
-
-	// Wait for session to end - if session ends normally, exit the program
-	err = session.Wait()
-	handleSSHSessionEnd(session, err)
+	cmd := exec.Command("ssh", sshArgs...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	err := cmd.Run()
+	handleSSHError(err, "SSH key authentication")
 }
