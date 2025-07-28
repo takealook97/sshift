@@ -27,7 +27,7 @@ import (
 )
 
 // Version information (injected during build)
-var Version = "1.3.7"
+var Version = "dev"
 
 // SSHift ASCII Art Logo
 const SSHiftLogo = `
@@ -3508,24 +3508,24 @@ func printHelp() {
 	printLogo()
 	fmt.Println()
 	fmt.Println("Usage:")
-	fmt.Println("  sshift                    - Run interactive menu")
-	fmt.Println("  sshift <server_id|name>   - Connect to server directly")
+	fmt.Println("  sshift                                  - Run interactive menu")
+	fmt.Println("  sshift <server_id|name>                 - Connect to server directly")
 	fmt.Println("  sshift <server_id|name> --cmd <command> - Connect and execute command")
-	fmt.Println("  sshift add                - Add new server")
-	fmt.Println("  sshift list               - List all servers")
-	fmt.Println("  sshift delete             - Delete server")
-	fmt.Println("  sshift edit               - Edit server")
-	fmt.Println("  sshift jump add           - Add jump relation")
-	fmt.Println("  sshift jump list          - List jump relations")
-	fmt.Println("  sshift jump delete        - Delete jump relation")
-	fmt.Println("  sshift sort               - Sort server IDs and update jump relations")
-	fmt.Println("  sshift export             - Export data to JSON file")
-	fmt.Println("  sshift import             - Import data from JSON file")
-	fmt.Println("  sshift key                - Show encryption key information")
-	fmt.Println("  sshift setup              - Setup encryption key")
-	fmt.Println("  sshift version            - Show version")
-	fmt.Println("  sshift test               - Run in test mode (simulate connections)")
-	fmt.Println("  sshift help               - Show this help")
+	fmt.Println("  sshift add                              - Add new server")
+	fmt.Println("  sshift list                             - List all servers")
+	fmt.Println("  sshift delete                           - Delete server")
+	fmt.Println("  sshift edit                             - Edit server")
+	fmt.Println("  sshift jump add                         - Add jump relation")
+	fmt.Println("  sshift jump list                        - List jump relations")
+	fmt.Println("  sshift jump delete                      - Delete jump relation")
+	fmt.Println("  sshift sort                             - Sort server IDs and update jump relations")
+	fmt.Println("  sshift export                           - Export data to JSON file")
+	fmt.Println("  sshift import                           - Import data from JSON file")
+	fmt.Println("  sshift key                              - Show encryption key information")
+	fmt.Println("  sshift setup                            - Setup encryption key")
+	fmt.Println("  sshift version                          - Show version")
+	fmt.Println("  sshift test                             - Run in test mode (simulate connections)")
+	fmt.Println("  sshift help                             - Show this help")
 
 	fmt.Println("\nSecurity Features:")
 	fmt.Println("  🔐 AES-256 encryption for password storage")
@@ -3857,10 +3857,10 @@ func connectWithSSHKey(server Server) {
 		return
 	}
 
-	// Bind standard input/output (used with PTY)
-	session.Stdout = os.Stdout
-	session.Stderr = os.Stderr
-	session.Stdin = os.Stdin
+	// If PTY is requested, do not bind standard input/output (prevents duplicate output)
+	// session.Stdout = os.Stdout
+	// session.Stderr = os.Stderr
+	// session.Stdin = os.Stdin
 
 	// Start shell
 	if err := session.Shell(); err != nil {
