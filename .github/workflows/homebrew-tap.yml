@@ -8,6 +8,7 @@ on:
 permissions:
   contents: write
   packages: write
+  actions: read
 
 jobs:
   build:
@@ -53,50 +54,33 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
+    environment: production
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Download all artifacts
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          path: ./artifacts
+          path: ./binaries
 
-      - name: List downloaded artifacts
+      - name: List downloaded files
         run: |
-          echo "Downloaded artifacts:"
-          find ./artifacts -type f -exec ls -la {} \;
+          echo "Downloaded files:"
+          find ./binaries -type f -exec ls -la {} \;
 
       - name: Create Release
         id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
+          name: Release ${{ github.ref }}
           draft: false
           prerelease: false
-
-      - name: Upload Linux Binary
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./artifacts/sshift-linux-amd64/sshift-linux-amd64
-          asset_name: sshift-linux-amd64
-          asset_content_type: application/octet-stream
-
-      - name: Upload macOS Binary
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./artifacts/sshift-darwin-amd64/sshift-darwin-amd64
-          asset_name: sshift-darwin-amd64
-          asset_content_type: application/octet-stream
+          files: |
+            ./binaries/sshift-linux-amd64/sshift-linux-amd64
+            ./binaries/sshift-darwin-amd64/sshift-darwin-amd64
+          token: ${{ secrets.GITHUB_TOKEN }}
 
   update-homebrew:
     needs: release
