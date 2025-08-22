@@ -1,89 +1,14 @@
-name: Build and Release
+name: Update Homebrew Tap
 
 on:
-  push:
-    tags:
-      - "v*"
-
-permissions:
-  contents: write
-  packages: write
-  actions: read
+  workflow_run:
+    workflows: ["Build and Release"]
+    types: [completed]
+    branches: [main]
 
 jobs:
-  build:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-        include:
-          - os: ubuntu-latest
-            platform: linux-amd64
-          - os: macos-latest
-            platform: darwin-amd64
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v4
-        with:
-          go-version: "1.21"
-
-      - name: Build binary
-        run: |
-          GOOS=$(echo ${{ matrix.platform }} | cut -d'-' -f1)
-          GOARCH=$(echo ${{ matrix.platform }} | cut -d'-' -f2)
-
-          echo "Building for $GOOS-$GOARCH..."
-
-          CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH go build -ldflags="-s -w" -o sshift-${{ matrix.platform }} main.go
-
-          # Verify binary
-          file sshift-${{ matrix.platform }}
-          ls -la sshift-${{ matrix.platform }}
-
-      - name: Upload binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: sshift-${{ matrix.platform }}
-          path: sshift-${{ matrix.platform }}
-          retention-days: 1
-
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    environment: production
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: ./binaries
-
-      - name: List downloaded files
-        run: |
-          echo "Downloaded files:"
-          find ./binaries -type f -exec ls -la {} \;
-
-      - name: Create Release
-        id: create_release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ github.ref }}
-          name: Release ${{ github.ref }}
-          draft: false
-          prerelease: false
-          files: |
-            ./binaries/sshift-linux-amd64/sshift-linux-amd64
-            ./binaries/sshift-darwin-amd64/sshift-darwin-amd64
-          token: ${{ secrets.GITHUB_TOKEN }}
-
   update-homebrew:
-    needs: release
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout tap repository
@@ -107,10 +32,23 @@ jobs:
           # Verify Homebrew installation
           /home/linuxbrew/.linuxbrew/bin/brew --version
 
+      - name: Get Release Version
+        id: version
+        run: |
+          # Get the latest release version from the main repository
+          VERSION=$(curl -s "https://api.github.com/repos/takealook97/sshift/releases/latest" | jq -r '.tag_name')
+          if [ "$VERSION" = "null" ] || [ -z "$VERSION" ]; then
+            echo "❌ Failed to get latest release version"
+            exit 1
+          fi
+          echo "version=${VERSION#v}" >> $GITHUB_OUTPUT
+          echo "tag=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Latest version: $VERSION"
+
       - name: Calculate SHA256
         id: sha256
         run: |
-          VERSION=${GITHUB_REF#refs/tags/}
+          VERSION=${{ steps.version.outputs.tag }}
           SOURCE_URL="https://github.com/takealook97/sshift/archive/refs/tags/${VERSION}.tar.gz"
 
           # Retry download if it fails
@@ -132,7 +70,6 @@ jobs:
           fi
 
           echo "sha256=$SHA256" >> $GITHUB_OUTPUT
-          echo "version=${VERSION#v}" >> $GITHUB_OUTPUT
 
       - name: Update Formula
         run: |
@@ -151,7 +88,7 @@ jobs:
           fi
 
           # Update URL and SHA256 in Formula/sshift.rb
-          VERSION=${GITHUB_REF#refs/tags/}
+          VERSION=${{ steps.version.outputs.tag }}
           sed -i "s|url \".*\"|url \"https://github.com/takealook97/sshift/archive/refs/tags/${VERSION}.tar.gz\"|" Formula/sshift.rb
           sed -i "s/sha256 \".*\"/sha256 \"${{ steps.sha256.outputs.sha256 }}\"/" Formula/sshift.rb
 
@@ -162,6 +99,8 @@ jobs:
           fi
 
           echo "✅ Formula updated successfully"
+          echo "Updated to version: ${{ steps.version.outputs.version }}"
+          echo "SHA256: ${{ steps.sha256.outputs.sha256 }}"
 
       - name: Test Formula
         run: |
@@ -243,7 +182,7 @@ jobs:
             echo "No changes to commit"
           else
             echo "Changes detected, committing..."
-            git commit -m "Update sshift to ${{ steps.sha256.outputs.version }}"
+            git commit -m "Update sshift to ${{ steps.version.outputs.version }}"
             
             # Get current branch for push
             PUSH_BRANCH=$(git branch --show-current)
