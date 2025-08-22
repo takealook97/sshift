@@ -30,6 +30,9 @@ jobs:
           # Verify Homebrew installation
           /home/linuxbrew/.linuxbrew/bin/brew --version
 
+          # Add the tap to Homebrew
+          /home/linuxbrew/.linuxbrew/bin/brew tap takealook97/sshift
+
       - name: Get Release Version
         id: version
         run: |
@@ -107,11 +110,11 @@ jobs:
           # Ensure Homebrew is in PATH
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
 
-          # Test the formula without installing
-          /home/linuxbrew/.linuxbrew/bin/brew audit Formula/sshift.rb || echo "Formula audit completed with warnings"
+          # Test the formula without installing (using name instead of path)
+          /home/linuxbrew/.linuxbrew/bin/brew audit sshift || echo "Formula audit completed with warnings"
 
           # Test formula installation (dry run)
-          /home/linuxbrew/.linuxbrew/bin/brew install --dry-run Formula/sshift.rb || echo "Formula installation test completed with warnings"
+          /home/linuxbrew/.linuxbrew/bin/brew install --dry-run sshift || echo "Formula installation test completed with warnings"
 
       - name: Commit and push
         run: |
