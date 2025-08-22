@@ -1,14 +1,12 @@
 name: Update Homebrew Tap
 
 on:
-  workflow_run:
-    workflows: ["Build and Release"]
-    types: [completed]
-    branches: [main]
+  push:
+    tags:
+      - "v*"
 
 jobs:
   update-homebrew:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout tap repository
