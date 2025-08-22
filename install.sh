@@ -50,6 +50,7 @@ install_sshift() {
     VERSION=$(get_latest_version)
     if [ -z "$VERSION" ]; then
         echo -e "${RED}Failed to get latest version${NC}"
+        echo -e "${YELLOW}Please check if there are any releases available at: https://github.com/$REPO/releases${NC}"
         exit 1
     fi
     
@@ -67,10 +68,25 @@ install_sshift() {
     cd "$TEMP_DIR"
     
     echo -e "${BLUE}📥 Downloading SSHift...${NC}"
-    curl -L -o "$BINARY_NAME" "$DOWNLOAD_URL"
+    echo -e "${YELLOW}URL: $DOWNLOAD_URL${NC}"
+    
+    # Download with better error handling
+    if ! curl -L -o "$BINARY_NAME" "$DOWNLOAD_URL"; then
+        echo -e "${RED}Download failed${NC}"
+        echo -e "${YELLOW}Please check if the release assets are available at: https://github.com/$REPO/releases/tag/$VERSION${NC}"
+        exit 1
+    fi
     
     if [ ! -f "$BINARY_NAME" ]; then
-        echo -e "${RED}Download failed${NC}"
+        echo -e "${RED}Download failed - file not found${NC}"
+        exit 1
+    fi
+    
+    # Check file size
+    FILE_SIZE=$(stat -c%s "$BINARY_NAME" 2>/dev/null || stat -f%z "$BINARY_NAME" 2>/dev/null || echo "0")
+    if [ "$FILE_SIZE" -lt 1000 ]; then
+        echo -e "${RED}Downloaded file is too small ($FILE_SIZE bytes) - likely an error page${NC}"
+        echo -e "${YELLOW}Please check if the release assets are properly uploaded${NC}"
         exit 1
     fi
     
@@ -80,6 +96,8 @@ install_sshift() {
     # Check if binary is valid
     if ! file "$BINARY_NAME" | grep -q "executable"; then
         echo -e "${RED}Invalid binary file${NC}"
+        echo -e "${YELLOW}File type: $(file "$BINARY_NAME")${NC}"
+        echo -e "${YELLOW}Please check if the release assets are properly uploaded${NC}"
         exit 1
     fi
     

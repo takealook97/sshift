@@ -1,4 +1,4 @@
-name: Update Homebrew Tap
+name: Build and Release
 
 on:
   push:
@@ -6,7 +6,88 @@ on:
       - "v*"
 
 jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            platform: linux-amd64
+          - os: macos-latest
+            platform: darwin-amd64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: "1.21"
+
+      - name: Build binary
+        run: |
+          GOOS=$(echo ${{ matrix.platform }} | cut -d'-' -f1)
+          GOARCH=$(echo ${{ matrix.platform }} | cut -d'-' -f2)
+
+          echo "Building for $GOOS-$GOARCH..."
+
+          CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH go build -ldflags="-s -w" -o sshift-${{ matrix.platform }} main.go
+
+          # Verify binary
+          file sshift-${{ matrix.platform }}
+          ls -la sshift-${{ matrix.platform }}
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v3
+        with:
+          name: sshift-${{ matrix.platform }}
+          path: sshift-${{ matrix.platform }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v3
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          draft: false
+          prerelease: false
+
+      - name: Upload Release Assets
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./sshift-linux-amd64/sshift-linux-amd64
+          asset_name: sshift-linux-amd64
+          asset_content_type: application/octet-stream
+
+      - name: Upload Release Assets
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./sshift-darwin-amd64/sshift-darwin-amd64
+          asset_name: sshift-darwin-amd64
+          asset_content_type: application/octet-stream
+
   update-homebrew:
+    needs: release
     runs-on: ubuntu-latest
     steps:
       - name: Checkout tap repository
