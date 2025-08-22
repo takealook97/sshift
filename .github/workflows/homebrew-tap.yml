@@ -5,6 +5,10 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: write
+  packages: write
+
 jobs:
   build:
     runs-on: ${{ matrix.os }}
@@ -44,6 +48,7 @@ jobs:
         with:
           name: sshift-${{ matrix.platform }}
           path: sshift-${{ matrix.platform }}
+          retention-days: 1
 
   release:
     needs: build
@@ -54,6 +59,13 @@ jobs:
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: List downloaded artifacts
+        run: |
+          echo "Downloaded artifacts:"
+          find ./artifacts -type f -exec ls -la {} \;
 
       - name: Create Release
         id: create_release
@@ -66,23 +78,23 @@ jobs:
           draft: false
           prerelease: false
 
-      - name: Upload Release Assets
+      - name: Upload Linux Binary
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./sshift-linux-amd64/sshift-linux-amd64
+          asset_path: ./artifacts/sshift-linux-amd64/sshift-linux-amd64
           asset_name: sshift-linux-amd64
           asset_content_type: application/octet-stream
 
-      - name: Upload Release Assets
+      - name: Upload macOS Binary
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./sshift-darwin-amd64/sshift-darwin-amd64
+          asset_path: ./artifacts/sshift-darwin-amd64/sshift-darwin-amd64
           asset_name: sshift-darwin-amd64
           asset_content_type: application/octet-stream
 
