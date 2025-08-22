@@ -19,7 +19,16 @@ BINARY_NAME="sshift"
 
 # Get latest version
 get_latest_version() {
-    curl -s "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/'
+    # Try GitHub API first, fallback to parsing releases page
+    VERSION=$(curl -s "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    
+    if [ -z "$VERSION" ]; then
+        # Fallback: parse the releases page directly
+        echo -e "${YELLOW}GitHub API rate limit reached, trying alternative method...${NC}" >&2
+        VERSION=$(curl -s "https://github.com/$REPO/releases" 2>/dev/null | grep -o 'href="/takealook97/sshift/releases/tag/v[^"]*"' | head -1 | sed 's/.*v\([^"]*\)".*/v\1/')
+    fi
+    
+    echo "$VERSION"
 }
 
 # Detect OS and architecture
