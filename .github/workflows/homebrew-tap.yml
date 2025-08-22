@@ -171,6 +171,14 @@ jobs:
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
 
+          # Pull latest changes to avoid conflicts
+          echo "Pulling latest changes from remote..."
+          git pull origin main || {
+            echo "Git pull failed, trying to reset and pull..."
+            git fetch origin
+            git reset --hard origin/main
+          }
+
           # Check final status
           echo "Final branch: $(git branch --show-current)"
           echo "Git status:"
