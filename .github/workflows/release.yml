@@ -103,10 +103,10 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            dist/sshift-linux-amd64
-            dist/sshift-darwin-amd64
-            dist/sshift-darwin-arm64
-            dist/sshift-windows-amd64.exe
+            dist/sshift-linux-amd64/sshift-linux-amd64
+            dist/sshift-darwin-amd64/sshift-darwin-amd64
+            dist/sshift-darwin-arm64/sshift-darwin-arm64
+            dist/sshift-windows-amd64.exe/sshift-windows-amd64.exe
           draft: false
           prerelease: false
         env:
